@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { delimiter, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -25,6 +25,10 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
+function pathEnv(bin: string): string {
+  return [bin, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
+}
+
 function writeFakeSshBin(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -45,64 +49,89 @@ function writeFakeSshBin(dir: string): string {
     '',
   ].join('\n'));
   chmodSync(ssh, 0o755);
+  writeFileSync(join(bin, 'ssh.cmd'), [
+    '@echo off',
+    'if not "%KNOWLEDGE_FAKE_SSH_TARGET_PATH%"=="" <nul set /p "=%~1" > "%KNOWLEDGE_FAKE_SSH_TARGET_PATH%"',
+    'set "KNOWLEDGE_FAKE_SSH_COMMAND=%~2"',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "if ($env:KNOWLEDGE_FAKE_SSH_COMMAND -match \'sync.*export\') { [Console]::Out.Write($env:KNOWLEDGE_FAKE_SSH_EXPORT_JSON); exit 0 } elseif ($env:KNOWLEDGE_FAKE_SSH_COMMAND -match \'sync.*import\') { [Console]::In.ReadToEnd() | Out-Null; [Console]::Out.Write($env:KNOWLEDGE_FAKE_SSH_IMPORT_JSON); exit 0 } else { [Console]::Error.Write(\'unexpected fake ssh command: \' + $env:KNOWLEDGE_FAKE_SSH_COMMAND); exit 9 }"',
+    'exit /b %ERRORLEVEL%',
+    '',
+  ].join('\r\n'));
   return bin;
 }
 
 function writeFakeMachinesRouteBin(bin: string, target: string, projectRoot = '/remote/open-knowledge'): void {
   const machines = join(bin, 'machines');
+  const routePayload = {
+    ok: true,
+    target,
+    route: 'tailscale',
+    source: 'tailscale',
+    confidence: 'high',
+    evidence: {
+      topology: true,
+      matched_by: 'machine_id',
+      selected_hint: {
+        kind: 'tailscale',
+        target,
+        reachable: true,
+      },
+    },
+    warnings: [],
+  };
+  const workspacePayload = {
+    ok: true,
+    requested_machine_id: 'linux-node-a',
+    machine_id: 'linux-node-a',
+    project: { project_id: 'open-knowledge', repo_name: 'open-knowledge' },
+    machine: { current: false, primary: false, trust_status: 'trusted', auth_status: 'authenticated' },
+    paths: {
+      workspace_root: { path: '/remote', source: 'manifest' },
+      project_root: { path: projectRoot, source: 'manifest_metadata' },
+      open_files_root: { path: '/remote/open-files', source: 'manifest_metadata' },
+    },
+    diagnostics: [{
+      id: 'project_root',
+      status: 'ok',
+      severity: 'ok',
+      message: 'project root mapped',
+      path: projectRoot,
+      source: 'manifest_metadata',
+      path_exists: null,
+    }],
+    repair_hints: [],
+    evidence: { topology: true, matched_by: 'machine_id', metadata_keys: [] },
+    warnings: [],
+  };
+  writeFileSync(join(bin, 'machines-route.json'), `${JSON.stringify(routePayload)}\n`);
+  writeFileSync(join(bin, 'machines-workspace.json'), `${JSON.stringify(workspacePayload)}\n`);
   writeFileSync(machines, [
     '#!/bin/sh',
     'if [ "$1" = "route" ]; then',
-    `  printf '%s\\n' '${JSON.stringify({
-      ok: true,
-      target,
-      route: 'tailscale',
-      source: 'tailscale',
-      confidence: 'high',
-      evidence: {
-        topology: true,
-        matched_by: 'machine_id',
-        selected_hint: {
-          kind: 'tailscale',
-          target,
-          reachable: true,
-        },
-      },
-      warnings: [],
-    })}'`,
+    `  cat ${JSON.stringify(join(bin, 'machines-route.json'))}`,
     '  exit 0',
     'fi',
     'if [ "$1" = "workspace" ] && [ "$2" = "resolve" ]; then',
-    `  printf '%s\\n' '${JSON.stringify({
-      ok: true,
-      requested_machine_id: 'linux-node-a',
-      machine_id: 'linux-node-a',
-      project: { project_id: 'open-knowledge', repo_name: 'open-knowledge' },
-      machine: { current: false, primary: false, trust_status: 'trusted', auth_status: 'authenticated' },
-      paths: {
-        workspace_root: { path: '/remote', source: 'manifest' },
-        project_root: { path: projectRoot, source: 'manifest_metadata' },
-        open_files_root: { path: '/remote/open-files', source: 'manifest_metadata' },
-      },
-      diagnostics: [{
-        id: 'project_root',
-        status: 'ok',
-        severity: 'ok',
-        message: 'project root mapped',
-        path: projectRoot,
-        source: 'manifest_metadata',
-        path_exists: null,
-      }],
-      repair_hints: [],
-      evidence: { topology: true, matched_by: 'machine_id', metadata_keys: [] },
-      warnings: [],
-    })}'`,
+    `  cat ${JSON.stringify(join(bin, 'machines-workspace.json'))}`,
     '  exit 0',
     'fi',
     'exit 9',
     '',
   ].join('\n'));
   chmodSync(machines, 0o755);
+  writeFileSync(join(bin, 'machines.cmd'), [
+    '@echo off',
+    'if "%~1"=="route" (',
+    '  type "%~dp0machines-route.json"',
+    '  exit /b 0',
+    ')',
+    'if "%~1"=="workspace" if "%~2"=="resolve" (',
+    '  type "%~dp0machines-workspace.json"',
+    '  exit /b 0',
+    ')',
+    'exit /b 9',
+    '',
+  ].join('\r\n'));
 }
 
 function emptySyncBundle() {
@@ -199,7 +228,7 @@ describe('knowledge MCP', () => {
       stderr: 'pipe',
       env: {
         ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        PATH: pathEnv(fakeBin),
         KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(emptySyncBundle()),
         KNOWLEDGE_FAKE_SSH_IMPORT_JSON: JSON.stringify(emptyImportResult()),
         KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,

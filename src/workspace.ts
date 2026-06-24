@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-export const HASNA_KNOWLEDGE_APP_PATH = join('.hasna', 'apps', 'knowledge');
+export const HASNA_KNOWLEDGE_APP_PATH = '.hasna/apps/knowledge';
 
 export interface KnowledgeWorkspace {
   home: string;

@@ -1,4 +1,4 @@
-export declare const HASNA_KNOWLEDGE_APP_PATH: string;
+export declare const HASNA_KNOWLEDGE_APP_PATH = ".hasna/apps/knowledge";
 export interface KnowledgeWorkspace {
     home: string;
     configPath: string;
@@ -80,7 +80,7 @@ export declare const EXAMPLE_KNOWLEDGE_CANONICAL: {
     readonly app_type: "opensource";
     readonly app: "knowledge";
     readonly env: "prod";
-    readonly local_path: string;
+    readonly local_path: ".hasna/apps/knowledge";
     readonly s3: {
         readonly bucket: "example-knowledge-prod";
         readonly region: "us-east-1";

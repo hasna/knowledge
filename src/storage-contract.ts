@@ -5,6 +5,10 @@ import { REMOTE_KNOWLEDGE_CONTRACT_VERSION } from './remote-client';
 import type { KnowledgeConfig, KnowledgeWorkspace } from './workspace';
 import { HASNA_KNOWLEDGE_APP_PATH, EXAMPLE_KNOWLEDGE_CANONICAL } from './workspace';
 
+function portablePath(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
 export interface StorageArtifactClass {
   kind: string;
   prefix: string;
@@ -306,7 +310,7 @@ export function validateStorageConfig(config: KnowledgeConfig, workspace: Knowle
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!workspace.home.endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
+  if (!portablePath(workspace.home).endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
     warnings.push(`Workspace home does not end with ${HASNA_KNOWLEDGE_APP_PATH}: ${workspace.home}`);
   }
 

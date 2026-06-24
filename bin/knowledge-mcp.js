@@ -15086,7 +15086,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
-var HASNA_KNOWLEDGE_APP_PATH = join(".hasna", "apps", "knowledge");
+var HASNA_KNOWLEDGE_APP_PATH = ".hasna/apps/knowledge";
 var EXAMPLE_KNOWLEDGE_CANONICAL = {
   division: "xyz",
   app_type: "opensource",
@@ -16009,6 +16009,7 @@ function revisionIdForSourceRef(uri) {
 // src/artifact-store.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, statSync, writeFileSync as writeFileSync3 } from "fs";
 import { dirname as dirname2, join as join3, relative, sep } from "path";
+import { pathToFileURL } from "url";
 function normalizeArtifactKey(key) {
   const raw = key.replace(/\\/g, "/").trim();
   if (!raw || raw.startsWith("/")) {
@@ -16054,7 +16055,7 @@ class LocalArtifactStore {
     assertInside(this.root, path);
     mkdirSync2(dirname2(path), { recursive: true });
     writeFileSync3(path, entry.body);
-    return { key, uri: `file://${path}`, modified_at: statSync(path).mtime.toISOString() };
+    return { key, uri: pathToFileURL(path).href, modified_at: statSync(path).mtime.toISOString() };
   }
   async getText(key) {
     const normalizedKey = normalizeArtifactKey(key);
@@ -17897,6 +17898,9 @@ class RemoteKnowledgeClient {
 }
 
 // src/storage-contract.ts
+function portablePath(value) {
+  return value.replace(/\\/g, "/");
+}
 var GENERATED_ARTIFACTS = [
   {
     kind: "schema",
@@ -18075,7 +18079,7 @@ function resolveStorageContract(config2, workspace, scope = "global") {
 function validateStorageConfig(config2, workspace) {
   const errors3 = [];
   const warnings = [];
-  if (!workspace.home.endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
+  if (!portablePath(workspace.home).endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
     warnings.push(`Workspace home does not end with ${HASNA_KNOWLEDGE_APP_PATH}: ${workspace.home}`);
   }
   if (config2.storage.type === "s3") {

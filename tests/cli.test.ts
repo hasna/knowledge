@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { delimiter, join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openKnowledgeDb } from '../src/knowledge-db';
 import { createKnowledgeService } from '../src/service';
@@ -71,6 +71,14 @@ function normalizedPath(path: string): string {
   return realpathSync(path);
 }
 
+function homeEnv(home: string): Record<string, string> {
+  return { HOME: home, USERPROFILE: home };
+}
+
+function pathEnv(bin: string): string {
+  return [bin, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
+}
+
 function writeFakeSshBin(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -91,6 +99,14 @@ function writeFakeSshBin(dir: string): string {
     '',
   ].join('\n'));
   chmodSync(ssh, 0o755);
+  writeFileSync(join(bin, 'ssh.cmd'), [
+    '@echo off',
+    'if not "%KNOWLEDGE_FAKE_SSH_TARGET_PATH%"=="" <nul set /p "=%~1" > "%KNOWLEDGE_FAKE_SSH_TARGET_PATH%"',
+    'set "KNOWLEDGE_FAKE_SSH_COMMAND=%~2"',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "if ($env:KNOWLEDGE_FAKE_SSH_COMMAND -match \'sync.*export\') { [Console]::Out.Write($env:KNOWLEDGE_FAKE_SSH_EXPORT_JSON); exit 0 } elseif ($env:KNOWLEDGE_FAKE_SSH_COMMAND -match \'sync.*import\') { $raw = [Console]::In.ReadToEnd(); if ($env:KNOWLEDGE_FAKE_SSH_STDIN_PATH) { [IO.File]::WriteAllText($env:KNOWLEDGE_FAKE_SSH_STDIN_PATH, $raw) }; [Console]::Out.Write($env:KNOWLEDGE_FAKE_SSH_IMPORT_JSON); exit 0 } else { [Console]::Error.Write(\'unexpected fake ssh command: \' + $env:KNOWLEDGE_FAKE_SSH_COMMAND); exit 9 }"',
+    'exit /b %ERRORLEVEL%',
+    '',
+  ].join('\r\n'));
   return bin;
 }
 
@@ -113,49 +129,53 @@ function writeFakeMachinesRouteBin(bin: string, target: string, projectRoot = '/
     apply_command: ['machines', 'workspace', 'repair', '--machine', 'linux-node-a', '--project', 'open-knowledge', '--repo', 'open-knowledge', '--open-files-repo', 'open-files', '--json', '--apply'],
     apply_shell_command: "machines workspace repair --machine linux-node-a --project open-knowledge --repo open-knowledge --open-files-repo open-files --json --apply",
   }] : [];
+  const routePayload = {
+    schema_version: 1,
+    ok: true,
+    machine_id: 'linux-node-a',
+    requested_machine_id: 'linux-node-a',
+    route: 'tailscale',
+    source: 'tailscale',
+    target,
+    command_target: target,
+    confidence: 'high',
+    evidence: {
+      topology: true,
+      matched_by: 'machine_id',
+      selected_hint: {
+        kind: 'tailscale',
+        target,
+        reachable: true,
+      },
+    },
+    warnings: [],
+  };
+  const workspacePayload = {
+    ok: true,
+    requested_machine_id: 'linux-node-a',
+    machine_id: 'linux-node-a',
+    project: { project_id: 'open-knowledge', repo_name: 'open-knowledge' },
+    machine: { current: false, primary: false, trust_status: 'trusted', auth_status: 'authenticated' },
+    paths: {
+      workspace_root: { path: '/remote', source: 'manifest' },
+      project_root: { path: projectRoot, source: 'manifest_metadata' },
+      open_files_root: { path: '/remote/open-files', source: 'manifest_metadata' },
+    },
+    diagnostics: workspaceDiagnostics,
+    repair_hints: workspaceRepairHints,
+    evidence: { topology: true, matched_by: 'machine_id', metadata_keys: [] },
+    warnings: includeRepairHint ? ['project_root_inferred:open-knowledge'] : [],
+  };
+  writeFileSync(join(bin, 'machines-route.json'), `${JSON.stringify(routePayload)}\n`);
+  writeFileSync(join(bin, 'machines-workspace.json'), `${JSON.stringify(workspacePayload)}\n`);
   writeFileSync(machines, [
     '#!/bin/sh',
     'if [ "$1" = "route" ]; then',
-    `  printf '%s\\n' '${JSON.stringify({
-      schema_version: 1,
-      ok: true,
-      machine_id: 'linux-node-a',
-      requested_machine_id: 'linux-node-a',
-      route: 'tailscale',
-      source: 'tailscale',
-      target,
-      command_target: target,
-      confidence: 'high',
-      evidence: {
-        topology: true,
-        matched_by: 'machine_id',
-        selected_hint: {
-          kind: 'tailscale',
-          target,
-          reachable: true,
-        },
-      },
-      warnings: [],
-    })}'`,
+    `  cat ${JSON.stringify(join(bin, 'machines-route.json'))}`,
     '  exit 0',
     'fi',
     'if [ "$1" = "workspace" ] && [ "$2" = "resolve" ]; then',
-    `  printf '%s\\n' '${JSON.stringify({
-      ok: true,
-      requested_machine_id: 'linux-node-a',
-      machine_id: 'linux-node-a',
-      project: { project_id: 'open-knowledge', repo_name: 'open-knowledge' },
-      machine: { current: false, primary: false, trust_status: 'trusted', auth_status: 'authenticated' },
-      paths: {
-        workspace_root: { path: '/remote', source: 'manifest' },
-        project_root: { path: projectRoot, source: 'manifest_metadata' },
-        open_files_root: { path: '/remote/open-files', source: 'manifest_metadata' },
-      },
-      diagnostics: workspaceDiagnostics,
-      repair_hints: workspaceRepairHints,
-      evidence: { topology: true, matched_by: 'machine_id', metadata_keys: [] },
-      warnings: includeRepairHint ? ['project_root_inferred:open-knowledge'] : [],
-    })}'`,
+    `  cat ${JSON.stringify(join(bin, 'machines-workspace.json'))}`,
     '  exit 0',
     'fi',
     'echo "unexpected fake machines command: $*" >&2',
@@ -163,6 +183,20 @@ function writeFakeMachinesRouteBin(bin: string, target: string, projectRoot = '/
     '',
   ].join('\n'));
   chmodSync(machines, 0o755);
+  writeFileSync(join(bin, 'machines.cmd'), [
+    '@echo off',
+    'if "%~1"=="route" (',
+    '  type "%~dp0machines-route.json"',
+    '  exit /b 0',
+    ')',
+    'if "%~1"=="workspace" if "%~2"=="resolve" (',
+    '  type "%~dp0machines-workspace.json"',
+    '  exit /b 0',
+    ')',
+    'echo unexpected fake machines command: %* 1>&2',
+    'exit /b 9',
+    '',
+  ].join('\r\n'));
 }
 
 function writeFailingMachinesBin(bin: string, marker: string): void {
@@ -176,6 +210,13 @@ function writeFailingMachinesBin(bin: string, marker: string): void {
     '',
   ].join('\n'));
   chmodSync(machines, 0o755);
+  writeFileSync(join(bin, 'machines.cmd'), [
+    '@echo off',
+    `echo unexpected fake machines command: %* >> ${JSON.stringify(marker)}`,
+    'echo unexpected fake machines command: %* 1>&2',
+    'exit /b 9',
+    '',
+  ].join('\r\n'));
 }
 
 describe('knowledge cli', () => {
@@ -322,7 +363,7 @@ describe('knowledge cli', () => {
     const storage = runCli(['storage', 'status', '--scope', 'project', '--json'], dir);
     expect(storage.exitCode).toBe(0);
     const storageOut = JSON.parse(new TextDecoder().decode(storage.stdout));
-    expect(storageOut.local_layout.app_path).toBe(join('.hasna', 'apps', 'knowledge'));
+    expect(storageOut.local_layout.app_path).toBe('.hasna/apps/knowledge');
     expect(storageOut.artifact_store.type).toBe('local');
     expect(storageOut.source_ownership.owner).toBe('open-files');
     expect(storageOut.source_ownership.raw_source_bytes_stored_in_open_knowledge).toBe(false);
@@ -354,7 +395,7 @@ describe('knowledge cli', () => {
     expect(['local', 'open-machines']).toContain(out.source);
     expect(out.adapter.package).toBe('@hasna/machines');
     expect(typeof out.adapter.available).toBe('boolean');
-    expect(out.knowledge.app_path).toBe(join('.hasna', 'apps', 'knowledge'));
+    expect(out.knowledge.app_path).toBe('.hasna/apps/knowledge');
     expect(normalizedPath(out.knowledge.workspace_home)).toBe(normalizedPath(join(dir, '.hasna', 'apps', 'knowledge')));
     expect(out.machines.length).toBeGreaterThanOrEqual(1);
     expect(out.machines.some((machine: any) => machine.local)).toBe(true);
@@ -371,7 +412,7 @@ describe('knowledge cli', () => {
     const result = runCli(
       ['machines', 'preflight', '--scope', 'project', '--workspace', join(__dirname, '..'), '--json'],
       dir,
-      { PATH: `${bin}:${process.env.PATH ?? ''}` },
+      { PATH: pathEnv(bin) },
     );
     expect(result.exitCode).toBe(0);
     const out = JSON.parse(new TextDecoder().decode(result.stdout));
@@ -390,7 +431,7 @@ describe('knowledge cli', () => {
     writeFakeMachinesRouteBin(bin, 'doctor-linux-node-a.tailnet.test', '/remote/open-knowledge', true);
 
     const result = runCli(['sync', 'doctor', '--machine', 'linux-node-a', '--scope', 'project', '--json'], dir, {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PATH: pathEnv(bin),
     });
 
     expect(result.exitCode).toBe(0);
@@ -703,7 +744,7 @@ describe('knowledge cli', () => {
       }],
     }, null, 2)}\n`);
 
-    const list = runCli(['list', '--json'], undefined, { HOME: home });
+    const list = runCli(['list', '--json'], undefined, homeEnv(home));
     expect(list.exitCode).toBe(0);
     const listOut = JSON.parse(new TextDecoder().decode(list.stdout));
     expect(listOut.total).toBe(1);
@@ -737,7 +778,7 @@ describe('knowledge cli', () => {
     }, null, 2)}\n`;
     writeFileSync(join(legacyDir, 'db.json'), legacyPayload);
 
-    const preview = runCli(['storage', 'import-legacy', '--dry-run', '--json'], undefined, { HOME: home });
+    const preview = runCli(['storage', 'import-legacy', '--dry-run', '--json'], undefined, homeEnv(home));
     expect(preview.exitCode).toBe(0);
     const out = JSON.parse(new TextDecoder().decode(preview.stdout));
     expect(out).toMatchObject({
@@ -760,7 +801,7 @@ describe('knowledge cli', () => {
   test('storage import-legacy rejects project scope without touching global store', () => {
     const home = mkdtempSync(join(tmpdir(), 'ok-legacy-scope-home-'));
     const dir = mkdtempSync(join(tmpdir(), 'ok-legacy-scope-project-'));
-    const rejected = runCli(['storage', 'import-legacy', '--scope', 'project', '--json'], dir, { HOME: home });
+    const rejected = runCli(['storage', 'import-legacy', '--scope', 'project', '--json'], dir, homeEnv(home));
     expect(rejected.exitCode).toBe(1);
     expect(new TextDecoder().decode(rejected.stderr)).toContain('only supports --scope global');
     expect(existsSync(join(home, '.hasna', 'apps', 'knowledge', 'db.json'))).toBe(false);
@@ -830,7 +871,7 @@ describe('knowledge cli', () => {
       ],
     }, null, 2)}\n`);
 
-    const imported = runCli(['storage', 'import-legacy', '--json'], undefined, { HOME: home });
+    const imported = runCli(['storage', 'import-legacy', '--json'], undefined, homeEnv(home));
     expect(imported.exitCode).toBe(0);
     const importOut = JSON.parse(new TextDecoder().decode(imported.stdout));
     expect(importOut).toMatchObject({
@@ -855,7 +896,7 @@ describe('knowledge cli', () => {
     expect(JSON.parse(readFileSync(importOut.report_path, 'utf8')).imported).toBe(1);
     expect(readFileSync(legacyPath, 'utf8')).toBe(legacyPayload);
 
-    const second = runCli(['storage', 'import-legacy', '--json'], undefined, { HOME: home });
+    const second = runCli(['storage', 'import-legacy', '--json'], undefined, homeEnv(home));
     expect(second.exitCode).toBe(0);
     const secondOut = JSON.parse(new TextDecoder().decode(second.stdout));
     expect(secondOut).toMatchObject({
@@ -901,7 +942,7 @@ describe('knowledge cli', () => {
       console.log(JSON.stringify(result));
     `;
     const child = Bun.spawnSync(['bun', '-e', script], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, ...homeEnv(home) },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -1149,7 +1190,7 @@ describe('knowledge cli', () => {
     writeFailingMachinesBin(bin, machinesMarker);
     writeFileSync(source, 'Explicit peer workspace sync must not require open-machines.');
 
-    const env = { PATH: `${bin}:${process.env.PATH ?? ''}` };
+    const env = { PATH: pathEnv(bin) };
     expect(runCli(['ingest', 'source', `file://${source}`, '--scope', 'project', '--json'], sourceDir, env).exitCode).toBe(0);
     expect(runCli(['wiki', 'init', '--scope', 'project', '--json'], sourceDir, env).exitCode).toBe(0);
 
@@ -1227,7 +1268,7 @@ describe('knowledge cli', () => {
     };
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json'], dir, {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PATH: pathEnv(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(oldBundle),
     });
 
@@ -1261,7 +1302,7 @@ describe('knowledge cli', () => {
     };
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json'], dir, {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PATH: pathEnv(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(bundle),
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,
     });
@@ -1318,7 +1359,7 @@ describe('knowledge cli', () => {
     };
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--scope', 'project', '--json'], dir, {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PATH: pathEnv(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(bundle),
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,
     });
@@ -1369,7 +1410,7 @@ describe('knowledge cli', () => {
     };
 
     const result = runCli(['sync', 'push', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json', '--dry-run'], dir, {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PATH: pathEnv(bin),
       KNOWLEDGE_FAKE_SSH_IMPORT_JSON: JSON.stringify(oldImportResult),
       KNOWLEDGE_FAKE_SSH_STDIN_PATH: stdinPath,
     });
