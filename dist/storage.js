@@ -23,7 +23,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
-var HASNA_KNOWLEDGE_APP_PATH = join(".hasna", "apps", "knowledge");
+var HASNA_KNOWLEDGE_APP_PATH = ".hasna/apps/knowledge";
 var EXAMPLE_KNOWLEDGE_CANONICAL = {
   division: "xyz",
   app_type: "opensource",

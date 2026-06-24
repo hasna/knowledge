@@ -14997,7 +14997,7 @@ import { existsSync as existsSync10, readFileSync as readFileSync10, writeFileSy
 // package.json
 var package_default = {
   name: "@hasna/knowledge",
-  version: "0.2.68",
+  version: "0.2.69",
   description: "Agent-friendly local knowledge CLI with JSON output, pagination, and safe destructive actions",
   type: "module",
   exports: {
@@ -15086,7 +15086,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
-var HASNA_KNOWLEDGE_APP_PATH = join(".hasna", "apps", "knowledge");
+var HASNA_KNOWLEDGE_APP_PATH = ".hasna/apps/knowledge";
 var EXAMPLE_KNOWLEDGE_CANONICAL = {
   division: "xyz",
   app_type: "opensource",
@@ -15122,9 +15122,6 @@ function canonicalExampleKnowledgeStorage() {
       server_side_encryption: EXAMPLE_KNOWLEDGE_CANONICAL.s3.server_side_encryption
     }
   };
-}
-function legacyGlobalStorePath() {
-  return join(homedir(), ".open-knowledge", "db.json");
 }
 function globalKnowledgeHome() {
   return join(homedir(), ".hasna", "apps", "knowledge");
@@ -15731,22 +15728,155 @@ function getKnowledgeDbStats(path) {
 // src/store.ts
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2, renameSync, unlinkSync } from "fs";
 import { randomUUID } from "crypto";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 function defaultStorePath() {
   return workspaceForHome(globalKnowledgeHome()).jsonStorePath;
 }
+function legacyGlobalStorePath() {
+  return join2(homedir2(), ".open-knowledge", "db.json");
+}
 function ensureStore(path) {
+  if (path === defaultStorePath() && existsSync2(legacyGlobalStorePath())) {
+    importLegacyGlobalStore();
+  }
   if (!existsSync2(path)) {
     ensureParentDir(path);
-    if (path === defaultStorePath() && existsSync2(legacyGlobalStorePath())) {
-      writeFileSync2(path, readFileSync2(legacyGlobalStorePath(), "utf8"));
+    writeFileSync2(path, `${JSON.stringify({ items: [] }, null, 2)}
+`);
+  }
+}
+function timestampForPath(now) {
+  return now.toISOString().replace(/[:.]/g, "-");
+}
+function storeIdentityKeys(item) {
+  const keys = [`id:${item.id}`];
+  if (typeof item.short_id === "string" && item.short_id.length > 0) {
+    keys.push(`short_id:${item.short_id}`);
+  }
+  return keys;
+}
+function indexStoreItems(items) {
+  const index = new Set;
+  for (const item of items) {
+    for (const key of storeIdentityKeys(item))
+      index.add(key);
+  }
+  return index;
+}
+function storeContainsItem(index, item) {
+  return storeIdentityKeys(item).some((key) => index.has(key));
+}
+function writeJsonFile(path, value) {
+  ensureParentDir(path);
+  writeFileSync2(path, `${JSON.stringify(value, null, 2)}
+`);
+}
+function readStoreFileForImport(path) {
+  const value = JSON.parse(readFileSync2(path, "utf8"));
+  if (!value || typeof value !== "object" || !Array.isArray(value.items)) {
+    return { store: { items: [] }, skippedInvalid: 0 };
+  }
+  const store = { items: [] };
+  let skippedInvalid = 0;
+  for (const item of value.items) {
+    if (item && typeof item === "object" && typeof item.id === "string" && item.id.length > 0) {
+      store.items.push(item);
     } else {
-      writeFileSync2(path, JSON.stringify({ items: [] }, null, 2));
+      skippedInvalid += 1;
     }
   }
+  return { store, skippedInvalid };
+}
+function importLegacyGlobalStore(options = {}) {
+  if (options.dryRun === true)
+    return importLegacyGlobalStoreUnlocked(options);
+  return withLock(defaultStorePath(), () => importLegacyGlobalStoreUnlocked(options));
+}
+function importLegacyGlobalStoreUnlocked(options = {}) {
+  const dryRun = options.dryRun === true;
+  const now = options.now ?? new Date;
+  const workspace = workspaceForHome(globalKnowledgeHome());
+  const legacyPath = legacyGlobalStorePath();
+  const canonicalPath = workspace.jsonStorePath;
+  const legacyExists = existsSync2(legacyPath);
+  const canonicalExisted = existsSync2(canonicalPath);
+  const result = {
+    ok: true,
+    dry_run: dryRun,
+    legacy_path: legacyPath,
+    canonical_path: canonicalPath,
+    legacy_exists: legacyExists,
+    canonical_existed: canonicalExisted,
+    canonical_created: false,
+    would_create_canonical: false,
+    imported: 0,
+    skipped_existing: 0,
+    skipped_invalid: 0,
+    backup_path: null,
+    report_path: null,
+    errors: [],
+    message: legacyExists ? "Legacy global store already imported" : "No legacy global store found"
+  };
+  if (!legacyExists)
+    return result;
+  let legacyStore;
+  try {
+    const legacy = readStoreFileForImport(legacyPath);
+    legacyStore = legacy.store;
+    result.skipped_invalid = legacy.skippedInvalid;
+  } catch (error51) {
+    result.ok = false;
+    result.errors.push(`Could not read legacy store: ${error51 instanceof Error ? error51.message : String(error51)}`);
+    result.message = "Legacy global store import failed";
+    return result;
+  }
+  let canonicalStore = { items: [] };
+  if (canonicalExisted) {
+    try {
+      canonicalStore = readStoreFileForImport(canonicalPath).store;
+    } catch (error51) {
+      result.ok = false;
+      result.errors.push(`Could not read canonical store: ${error51 instanceof Error ? error51.message : String(error51)}`);
+      result.message = "Legacy global store import failed";
+      return result;
+    }
+  }
+  const index = indexStoreItems(canonicalStore.items);
+  const merged = { items: [...canonicalStore.items] };
+  for (const item of legacyStore.items) {
+    if (!item?.id) {
+      result.skipped_invalid += 1;
+      continue;
+    }
+    if (storeContainsItem(index, item)) {
+      result.skipped_existing += 1;
+      continue;
+    }
+    merged.items.push(item);
+    for (const key of storeIdentityKeys(item))
+      index.add(key);
+    result.imported += 1;
+  }
+  result.would_create_canonical = !canonicalExisted && result.imported > 0;
+  result.canonical_created = !dryRun && result.would_create_canonical;
+  result.message = result.imported > 0 ? `Imported ${result.imported} legacy item(s) into canonical knowledge store` : "Legacy global store already imported";
+  if (dryRun || result.imported === 0)
+    return result;
+  const suffix = `${timestampForPath(now)}-${randomUUID().slice(0, 8)}`;
+  if (canonicalExisted) {
+    result.backup_path = join2(workspace.exportsDir, `legacy-open-knowledge-db-before-import-${suffix}.json`);
+    writeJsonFile(result.backup_path, canonicalStore);
+  }
+  writeJsonFile(canonicalPath, merged);
+  result.report_path = join2(workspace.runsDir, `legacy-open-knowledge-import-${suffix}.json`);
+  writeJsonFile(result.report_path, result);
+  return result;
 }
 function lockPath(path) {
   return `${path}.lock`;
 }
+var heldLockPaths = new Set;
 function acquireLock(lockPath2, ownerId) {
   const maxWait = 5000;
   const interval = 50;
@@ -15794,10 +15924,15 @@ function saveStore(path, store) {
 function withLock(path, fn) {
   const owner = randomUUID();
   const lpath = lockPath(path);
+  if (heldLockPaths.has(lpath))
+    return fn();
+  ensureParentDir(path);
   acquireLock(lpath, owner);
+  heldLockPaths.add(lpath);
   try {
     return fn();
   } finally {
+    heldLockPaths.delete(lpath);
     releaseLock(lpath, owner);
   }
 }
@@ -15840,8 +15975,10 @@ function parseS3Ref(uri) {
   return { kind: "s3", uri, bucket, key };
 }
 function parseFileRef(uri) {
-  const parsed = new URL(uri);
-  return { kind: "file", uri, path: decodeURIComponent(parsed.pathname) };
+  const parsed = new URL(uri.replace(/\\/g, "/"));
+  const pathname = decodeURIComponent(parsed.pathname);
+  const path = /^\/[A-Za-z]:($|\/)/.test(pathname) ? pathname.slice(1) : pathname;
+  return { kind: "file", uri, path };
 }
 function parseWebRef(uri) {
   const parsed = new URL(uri);
@@ -15871,7 +16008,8 @@ function revisionIdForSourceRef(uri) {
 
 // src/artifact-store.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, statSync, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname2, join as join2, relative, sep } from "path";
+import { dirname as dirname2, join as join3, relative, sep } from "path";
+import { pathToFileURL } from "url";
 function normalizeArtifactKey(key) {
   const raw = key.replace(/\\/g, "/").trim();
   if (!raw || raw.startsWith("/")) {
@@ -15913,21 +16051,21 @@ class LocalArtifactStore {
   }
   async put(entry) {
     const key = normalizeArtifactKey(entry.key);
-    const path = join2(this.root, key);
+    const path = join3(this.root, key);
     assertInside(this.root, path);
     mkdirSync2(dirname2(path), { recursive: true });
     writeFileSync3(path, entry.body);
-    return { key, uri: `file://${path}`, modified_at: statSync(path).mtime.toISOString() };
+    return { key, uri: pathToFileURL(path).href, modified_at: statSync(path).mtime.toISOString() };
   }
   async getText(key) {
     const normalizedKey = normalizeArtifactKey(key);
-    const path = join2(this.root, normalizedKey);
+    const path = join3(this.root, normalizedKey);
     assertInside(this.root, path);
     return readFileSync3(path, "utf8");
   }
   async exists(key) {
     const normalizedKey = normalizeArtifactKey(key);
-    const path = join2(this.root, normalizedKey);
+    const path = join3(this.root, normalizedKey);
     assertInside(this.root, path);
     return existsSync3(path);
   }
@@ -16036,12 +16174,12 @@ import { createHash as createHash13 } from "crypto";
 import { spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync9, readFileSync as readFileSync9 } from "fs";
 import { hostname as hostname5 } from "os";
-import { join as join4, resolve as resolve4 } from "path";
+import { join as join5, resolve as resolve4 } from "path";
 
 // src/auth.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "fs";
-import { homedir as homedir2 } from "os";
-import { dirname as dirname3, join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+import { dirname as dirname3, join as join4 } from "path";
 var DEFAULT_KNOWLEDGE_API_URL = "https://knowledge.hasna.xyz";
 function normalizeKnowledgeApiOrigin(apiUrl) {
   const url2 = new URL(apiUrl);
@@ -16061,8 +16199,8 @@ function normalizeKnowledgeApiOrigin(apiUrl) {
 function knowledgeAuthPath(env = process.env) {
   if (env.HASNA_KNOWLEDGE_AUTH_PATH)
     return env.HASNA_KNOWLEDGE_AUTH_PATH;
-  const root = env.HASNA_KNOWLEDGE_AUTH_DIR ?? join3(homedir2(), ".hasna", "knowledge");
-  return join3(root, "auth.json");
+  const root = env.HASNA_KNOWLEDGE_AUTH_DIR ?? join4(homedir3(), ".hasna", "knowledge");
+  return join4(root, "auth.json");
 }
 function resolveKnowledgeApiUrl(config2, env = process.env) {
   return normalizeKnowledgeApiOrigin(env.KNOWLEDGE_API_URL ?? config2?.hosted?.api_url ?? DEFAULT_KNOWLEDGE_API_URL);
@@ -17760,6 +17898,9 @@ class RemoteKnowledgeClient {
 }
 
 // src/storage-contract.ts
+function portablePath(value) {
+  return value.replace(/\\/g, "/");
+}
 var GENERATED_ARTIFACTS = [
   {
     kind: "schema",
@@ -17938,7 +18079,7 @@ function resolveStorageContract(config2, workspace, scope = "global") {
 function validateStorageConfig(config2, workspace) {
   const errors3 = [];
   const warnings = [];
-  if (!workspace.home.endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
+  if (!portablePath(workspace.home).endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
     warnings.push(`Workspace home does not end with ${HASNA_KNOWLEDGE_APP_PATH}: ${workspace.home}`);
   }
   if (config2.storage.type === "s3") {
@@ -23902,7 +24043,7 @@ function recordWikiLayoutCatalog(db, artifacts, now = new Date) {
 // src/service.ts
 function resolvePeerWorkspace(input) {
   const target = resolve4(input);
-  if (existsSync9(join4(target, "knowledge.db")) || existsSync9(join4(target, "config.json"))) {
+  if (existsSync9(join5(target, "knowledge.db")) || existsSync9(join5(target, "config.json"))) {
     return ensureKnowledgeWorkspace(target);
   }
   return ensureKnowledgeWorkspace(workspaceForHome(projectKnowledgeHome(target)).home);
@@ -24475,7 +24616,8 @@ function doctorRecommendations(input) {
   return commands;
 }
 function runSshCommand(machine, command, input, resolved) {
-  const result = spawnSync2("ssh", [resolved.target, command], {
+  const sshBin = process.env.KNOWLEDGE_SSH_BIN || "ssh";
+  const result = spawnSync2(sshBin, [resolved.target, command], {
     encoding: "utf8",
     env: process.env,
     input,

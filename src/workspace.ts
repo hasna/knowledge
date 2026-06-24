@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-export const HASNA_KNOWLEDGE_APP_PATH = join('.hasna', 'apps', 'knowledge');
+export const HASNA_KNOWLEDGE_APP_PATH = '.hasna/apps/knowledge';
 
 export interface KnowledgeWorkspace {
   home: string;
@@ -118,10 +118,6 @@ export function canonicalExampleKnowledgeStorage(): KnowledgeConfig['storage'] {
       server_side_encryption: EXAMPLE_KNOWLEDGE_CANONICAL.s3.server_side_encryption,
     },
   };
-}
-
-export function legacyGlobalStorePath(): string {
-  return join(homedir(), '.open-knowledge', 'db.json');
 }
 
 export function globalKnowledgeHome(): string {

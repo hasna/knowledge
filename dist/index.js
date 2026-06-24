@@ -14893,7 +14893,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
-var HASNA_KNOWLEDGE_APP_PATH = join(".hasna", "apps", "knowledge");
+var HASNA_KNOWLEDGE_APP_PATH = ".hasna/apps/knowledge";
 var EXAMPLE_KNOWLEDGE_CANONICAL = {
   division: "xyz",
   app_type: "opensource",
@@ -16227,6 +16227,7 @@ function coerceForSqlite(value) {
 // src/artifact-store.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, statSync, writeFileSync as writeFileSync2 } from "fs";
 import { dirname as dirname2, join as join2, relative, sep } from "path";
+import { pathToFileURL } from "url";
 function normalizeArtifactKey(key) {
   const raw = key.replace(/\\/g, "/").trim();
   if (!raw || raw.startsWith("/")) {
@@ -16272,7 +16273,7 @@ class LocalArtifactStore {
     assertInside(this.root, path);
     mkdirSync2(dirname2(path), { recursive: true });
     writeFileSync2(path, entry.body);
-    return { key, uri: `file://${path}`, modified_at: statSync(path).mtime.toISOString() };
+    return { key, uri: pathToFileURL(path).href, modified_at: statSync(path).mtime.toISOString() };
   }
   async getText(key) {
     const normalizedKey = normalizeArtifactKey(key);
@@ -18115,6 +18116,9 @@ class RemoteKnowledgeClient {
 }
 
 // src/storage-contract.ts
+function portablePath(value) {
+  return value.replace(/\\/g, "/");
+}
 var GENERATED_ARTIFACTS = [
   {
     kind: "schema",
@@ -18293,7 +18297,7 @@ function resolveStorageContract(config, workspace, scope = "global") {
 function validateStorageConfig(config, workspace) {
   const errors = [];
   const warnings = [];
-  if (!workspace.home.endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
+  if (!portablePath(workspace.home).endsWith(HASNA_KNOWLEDGE_APP_PATH)) {
     warnings.push(`Workspace home does not end with ${HASNA_KNOWLEDGE_APP_PATH}: ${workspace.home}`);
   }
   if (config.storage.type === "s3") {
@@ -20506,8 +20510,10 @@ function parseS3Ref(uri) {
   return { kind: "s3", uri, bucket, key };
 }
 function parseFileRef(uri) {
-  const parsed = new URL(uri);
-  return { kind: "file", uri, path: decodeURIComponent(parsed.pathname) };
+  const parsed = new URL(uri.replace(/\\/g, "/"));
+  const pathname = decodeURIComponent(parsed.pathname);
+  const path = /^\/[A-Za-z]:($|\/)/.test(pathname) ? pathname.slice(1) : pathname;
+  return { kind: "file", uri, path };
 }
 function parseWebRef(uri) {
   const parsed = new URL(uri);
@@ -25022,7 +25028,8 @@ function doctorRecommendations(input) {
   return commands;
 }
 function runSshCommand(machine, command, input, resolved) {
-  const result = spawnSync2("ssh", [resolved.target, command], {
+  const sshBin = process.env.KNOWLEDGE_SSH_BIN || "ssh";
+  const result = spawnSync2(sshBin, [resolved.target, command], {
     encoding: "utf8",
     env: process.env,
     input,

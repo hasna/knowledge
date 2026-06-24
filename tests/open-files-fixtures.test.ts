@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildKnowledgeSyncFixturePack } from '../../open-files/src/lib/knowledge-sync-fixtures';
+import { buildKnowledgeSyncFixturePack } from './fixtures/knowledge-sync-fixtures';
 import { getKnowledgeDbStats, openKnowledgeDb } from '../src/knowledge-db';
 import { ingestOpenFilesManifest } from '../src/manifest-ingest';
 import { consumeOpenFilesOutbox } from '../src/outbox-consume';

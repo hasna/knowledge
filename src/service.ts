@@ -1061,7 +1061,8 @@ function doctorRecommendations(input: {
 }
 
 function runSshCommand(machine: string, command: string, input: string | undefined, resolved: KnowledgeMachineRouteResolution): string {
-  const result = spawnSync('ssh', [resolved.target, command], {
+  const sshBin = process.env.KNOWLEDGE_SSH_BIN || 'ssh';
+  const result = spawnSync(sshBin, [resolved.target, command], {
     encoding: 'utf8',
     env: process.env,
     input,
