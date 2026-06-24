@@ -15975,8 +15975,10 @@ function parseS3Ref(uri) {
   return { kind: "s3", uri, bucket, key };
 }
 function parseFileRef(uri) {
-  const parsed = new URL(uri);
-  return { kind: "file", uri, path: decodeURIComponent(parsed.pathname) };
+  const parsed = new URL(uri.replace(/\\/g, "/"));
+  const pathname = decodeURIComponent(parsed.pathname);
+  const path = /^\/[A-Za-z]:($|\/)/.test(pathname) ? pathname.slice(1) : pathname;
+  return { kind: "file", uri, path };
 }
 function parseWebRef(uri) {
   const parsed = new URL(uri);

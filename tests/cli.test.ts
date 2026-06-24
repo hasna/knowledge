@@ -1868,6 +1868,8 @@ describe('knowledge cli', () => {
       key: 'docs/handbook.pdf',
     });
     expect(parseSourceRef('file:///tmp/readme.md')).toMatchObject({ kind: 'file', path: '/tmp/readme.md' });
+    expect(parseSourceRef('file:///C:/Users/Alice/source.md')).toMatchObject({ kind: 'file', path: 'C:/Users/Alice/source.md' });
+    expect(parseSourceRef('file://C:\\Users\\Alice\\source.md')).toMatchObject({ kind: 'file', path: 'C:/Users/Alice/source.md' });
     expect(parseSourceRef('https://example.com/docs')).toMatchObject({ kind: 'web', url: 'https://example.com/docs' });
   });
 });
