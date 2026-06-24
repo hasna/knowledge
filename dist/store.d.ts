@@ -13,8 +13,30 @@ export interface KnowledgeItem {
 export interface Store {
     items: KnowledgeItem[];
 }
+export interface LegacyGlobalStoreImportOptions {
+    dryRun?: boolean;
+    now?: Date;
+}
+export interface LegacyGlobalStoreImportResult {
+    ok: boolean;
+    dry_run: boolean;
+    legacy_path: string;
+    canonical_path: string;
+    legacy_exists: boolean;
+    canonical_existed: boolean;
+    canonical_created: boolean;
+    would_create_canonical: boolean;
+    imported: number;
+    skipped_existing: number;
+    skipped_invalid: number;
+    backup_path: string | null;
+    report_path: string | null;
+    errors: string[];
+    message: string;
+}
 export declare function defaultStorePath(): string;
 export declare function ensureStore(path: string): void;
+export declare function importLegacyGlobalStore(options?: LegacyGlobalStoreImportOptions): LegacyGlobalStoreImportResult;
 export declare function loadStore(path: string): Store;
 export declare function saveStore(path: string, store: Store): void;
 export declare function withLock<T>(path: string, fn: () => T): T;

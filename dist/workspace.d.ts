@@ -99,7 +99,6 @@ export declare const EXAMPLE_KNOWLEDGE_CANONICAL: {
     readonly evidence_doc: "docs/canonical-secrets-bootstrap-2026-06-08.md";
 };
 export declare function canonicalExampleKnowledgeStorage(): KnowledgeConfig['storage'];
-export declare function legacyGlobalStorePath(): string;
 export declare function globalKnowledgeHome(): string;
 export declare function projectKnowledgeHome(cwd?: string): string;
 export declare function workspaceForHome(home: string): KnowledgeWorkspace;

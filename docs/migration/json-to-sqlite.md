@@ -22,20 +22,35 @@ pages, generated artifacts, runs, audit events, and reindex jobs.
 
 ## What Migrates Automatically
 
-Global legacy notes are migrated on first use:
+Global legacy notes can be imported from:
 
 ```text
 ~/.open-knowledge/db.json
 ```
 
-to:
+into the canonical global JSON store:
 
 ```text
 ~/.hasna/apps/knowledge/db.json
 ```
 
-This happens only when the new app JSON store does not already exist. The
-legacy file is not deleted.
+The canonical store remains the runtime source of truth. The legacy file is
+only read as a migration source, is not deleted, and is never rewritten by the
+import path.
+
+The import runs automatically on first global use and can also be previewed or
+run explicitly:
+
+```bash
+knowledge storage import-legacy --dry-run --json
+knowledge storage import-legacy --json
+```
+
+When the canonical JSON store already exists, legacy items are merged into it
+without overwriting records that already match by `id` or `short_id`. If the
+merge writes new items, the pre-import canonical store is backed up under
+`~/.hasna/apps/knowledge/exports/` and a report is written under
+`~/.hasna/apps/knowledge/runs/`.
 
 Project mode writes directly to:
 

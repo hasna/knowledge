@@ -81,10 +81,12 @@ Project-local state lives at:
   wiki/
 ```
 
-The legacy JSON store at `~/.open-knowledge/db.json` remains readable for
-migration and compatibility. New project mode should prefer
-`.hasna/apps/knowledge/knowledge.db` and generated artifacts under the same app
-home.
+The legacy JSON store at `~/.open-knowledge/db.json` remains readable only as a
+migration source. Imports merge into the canonical app home without modifying
+the legacy file; new runtime state must live under `~/.hasna/apps/knowledge`
+for global scope or `.hasna/apps/knowledge` for project scope. New project mode
+should prefer `.hasna/apps/knowledge/knowledge.db` and generated artifacts under
+the same app home.
 
 Global/user state may use a Hasna data directory, but project mode is the
 default for company knowledge because it keeps artifacts close to the repo or

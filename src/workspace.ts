@@ -120,10 +120,6 @@ export function canonicalExampleKnowledgeStorage(): KnowledgeConfig['storage'] {
   };
 }
 
-export function legacyGlobalStorePath(): string {
-  return join(homedir(), '.open-knowledge', 'db.json');
-}
-
 export function globalKnowledgeHome(): string {
   return join(homedir(), '.hasna', 'apps', 'knowledge');
 }

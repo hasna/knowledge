@@ -680,9 +680,21 @@ Default global compatibility store: `~/.hasna/apps/knowledge/db.json`
 
 Project workspace: `.hasna/apps/knowledge/`
 
-The legacy `~/.open-knowledge/db.json` store is migrated into the new global
-Hasna app path on first use if the new store does not exist. Override item-store
-location with `--store <path>`.
+The legacy `~/.open-knowledge/db.json` store is only read as a migration
+source. On first global use, or with `knowledge storage import-legacy`, legacy
+items are merged into `~/.hasna/apps/knowledge/db.json`; existing canonical
+items win on `id` or `short_id` collisions. The legacy file is not moved,
+rewritten, or deleted. When an existing canonical store changes, a pre-import
+backup is written under `~/.hasna/apps/knowledge/exports/` and an import report
+is written under `~/.hasna/apps/knowledge/runs/`.
+
+Preview a legacy import without writing:
+
+```bash
+knowledge storage import-legacy --dry-run --json
+```
+
+Override item-store location with `--store <path>`.
 
 ## MCP Server
 
