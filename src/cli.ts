@@ -41,6 +41,7 @@ function log(level: LogLevel, msg: string, data?: Record<string, unknown>): void
 
 interface Flags {
   json?: boolean;
+  verbose?: boolean;
   yes?: boolean;
   help?: boolean;
   version?: boolean;
@@ -120,6 +121,7 @@ function parseArgs(argv: string[]): ParseResult {
     }
     switch (token) {
       case '--json': flags.json = true; break;
+      case '--verbose': flags.verbose = true; break;
       case '--yes': case '-y': flags.yes = true; break;
       case '--help': case '-h': flags.help = true; break;
       case '--version': case '-v': flags.version = true; break;
@@ -275,6 +277,7 @@ Commands:
 
 Global Options:
   --json                      Output JSON
+  --verbose                   Show full human-readable details for object output
   --store <path>              Override store path
   --purpose <name>            Read-only source purpose (default: knowledge_answer)
   --model <provider:model>     AI/embedding model ref
@@ -337,7 +340,7 @@ Delete Options:
   -y, --yes                   Confirm destructive action
 
 Export Options:
-  --format jsonl              Export as newline-delimited JSON (default: JSON array)
+  --format json|jsonl         Export full records as JSON or newline-delimited JSON
 
 Prune Options:
   --older-than <days>          Remove items older than N days
@@ -346,7 +349,7 @@ Prune Options:
 
 function printCommandHelp(command: string): void {
   if (command === 'add') { console.log('Usage: knowledge add <title> <content> [--url <url>] [-t <tag>] [--json]'); return; }
-  if (command === 'list' || command === 'ls') { console.log('Usage: knowledge list|ls [--format table|json] [-p <page>] [-l <limit>] [-s <search>] [-t <tag>] [--sort created|title] [--desc] [--json]'); return; }
+  if (command === 'list' || command === 'ls') { console.log('Usage: knowledge list|ls [--format table|json] [-p <page>] [-l <limit>] [-s <search>] [-t <tag>] [--sort created|title] [--desc] [--verbose] [--json]'); return; }
   if (command === 'get') { console.log('Usage: knowledge get --id <id> [--json]'); return; }
   if (command === 'update' || command === 'edit') { console.log('Usage: knowledge update|edit --id <id> [--title <title>] [--content <content>] [--url <url>] [-t <tag>] [--json]'); return; }
   if (command === 'archive') { console.log('Usage: knowledge archive --id <id> [--json]'); return; }
@@ -354,27 +357,27 @@ function printCommandHelp(command: string): void {
   if (command === 'upsert') { console.log('Usage: knowledge upsert [title] [content] [--id <id>] [--title <title>] [--content <content>] [--url <url>] [-t <tag>] [--json]'); return; }
   if (command === 'untag') { console.log('Usage: knowledge untag --id <id> -t <tag> [--json]'); return; }
   if (command === 'delete' || command === 'rm') { console.log('Usage: knowledge delete|rm --id <id> -y [--json]'); return; }
-  if (command === 'export') { console.log('Usage: knowledge export [--format jsonl] [--json]'); return; }
+  if (command === 'export') { console.log('Usage: knowledge export [--verbose] [--json] [--format json|jsonl]'); return; }
   if (command === 'prune') { console.log('Usage: knowledge prune --yes [--older-than <days>] [--empty] [--json]'); return; }
   if (command === 'dedupe') { console.log('Usage: knowledge dedupe --yes [--json]'); return; }
   if (command === 'stats') { console.log('Usage: knowledge stats [--json]'); return; }
-  if (command === 'inventory') { console.log('Usage: knowledge inventory [--scope local|global|project] [--limit <n>] [--include-archived] [--json]'); return; }
-  if (command === 'paths') { console.log('Usage: knowledge paths [--scope local|global|project] [--json]'); return; }
+  if (command === 'inventory') { console.log('Usage: knowledge inventory [--scope local|global|project] [--limit <n>] [--include-archived] [--verbose] [--json]'); return; }
+  if (command === 'paths') { console.log('Usage: knowledge paths [--scope local|global|project] [--verbose] [--json]'); return; }
   if (command === 'setup') { console.log('Usage: knowledge setup --mode local|hosted [--api-url https://...] [--canonical-example] [--scope local|global|project] [--json]'); return; }
   if (command === 'auth') { console.log('Usage: knowledge auth login|whoami|logout [--api-key <key>] [--email <email>] [--org <slug>] [--api-url https://...] [--scope local|global|project] [--json]'); return; }
-  if (command === 'remote') { console.log('Usage: knowledge remote contracts|status [--scope local|global|project] [--json]'); return; }
-  if (command === 'storage') { console.log('Usage: knowledge storage status|validate|repair-artifact-keys [--approve-write --approved-by <name>] [--scope local|global|project] [--json]'); return; }
-  if (command === 'machines') { console.log('Usage: knowledge machines topology [--no-tailscale] | preflight [machine] [--workspace <repo>] [--scope local|global|project] [--json]'); return; }
-  if (command === 'sync') { console.log('Usage: knowledge sync status|doctor|readiness|snapshot|machines|conflicts [show|propose|resolve] [id] | dry-run|pull|push|sync|export|import [--peer-workspace <path>] [--machine <ssh-alias>] [--tables <names>] [--dry-run] [--limit <n>] [--approve-write] [--approved-by <name>] [--strategy <name>] [--mode deterministic|ai] [--model <alias|provider:model>] [--fake] [--no-tailscale] [--scope local|global|project] [--json]\n\nRemote machine sync resolves peer paths through @hasna/machines when --peer-workspace is omitted.'); return; }
+  if (command === 'remote') { console.log('Usage: knowledge remote contracts|status [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'storage') { console.log('Usage: knowledge storage status|validate|repair-artifact-keys [--approve-write --approved-by <name>] [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'machines') { console.log('Usage: knowledge machines topology [--no-tailscale] | preflight [machine] [--workspace <repo>] [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'sync') { console.log('Usage: knowledge sync status|doctor|readiness|snapshot|machines|conflicts [show|propose|resolve] [id] | dry-run|pull|push|sync|export|import [--peer-workspace <path>] [--machine <ssh-alias>] [--tables <names>] [--dry-run] [--limit <n>] [--approve-write] [--approved-by <name>] [--strategy <name>] [--mode deterministic|ai] [--model <alias|provider:model>] [--fake] [--no-tailscale] [--scope local|global|project] [--verbose] [--json]\n\nRemote machine sync resolves peer paths through @hasna/machines when --peer-workspace is omitted.'); return; }
   if (command === 'db') { console.log('Usage: knowledge db init|stats|storage status|push|pull|sync [--tables sources,chunks] [--scope local|global|project] [--json]'); return; }
   if (command === 'wiki') { console.log('Usage: knowledge wiki init|compile|file-answer|lint [query|prompt] [--title <title>] [--content <answer>] [--approve-write] [--limit <n>] [--scope local|global|project] [--json]'); return; }
   if (command === 'source') { console.log('Usage: knowledge source resolve <source-ref> [--purpose knowledge_answer|knowledge_index] [--limit <n>] [--scope local|global|project] [--json]'); return; }
   if (command === 'ingest') { console.log('Usage: knowledge ingest manifest <file|s3://bucket/key> | source <source-ref> [--purpose knowledge_index] [--scope local|global|project] [--json]'); return; }
   if (command === 'reindex') { console.log('Usage: knowledge reindex status|enqueue|embeddings|outbox [file|s3://bucket/key] [--full] [--fake] [--scope local|global|project] [--json]'); return; }
-  if (command === 'search') { console.log('Usage: knowledge search <query> [--context] [--semantic] [--model openai:text-embedding-3-small] [--limit <n>] [--dimensions <n>] [--fake] [--scope local|global|project] [--json]'); return; }
-  if (command === 'web') { console.log('Usage: knowledge web search <query> [--provider openai|anthropic] [--model provider:model] [--domain <domain>] [--file-results] [--fake] [--scope local|global|project] [--json]'); return; }
-  if (command === 'ask' || command === 'build') { console.log('Usage: knowledge ask|build <prompt> [--generate] [--semantic] [--model default|provider:model] [--approve-write] [--scope local|global|project] [--json]'); return; }
-  if (command === 'embeddings') { console.log('Usage: knowledge embeddings status|index|search [query] [--model openai:text-embedding-3-small] [--limit <n>] [--dimensions <n>] [--fake] [--scope local|global|project] [--json]'); return; }
+  if (command === 'search') { console.log('Usage: knowledge search <query> [--context] [--semantic] [--model openai:text-embedding-3-small] [--limit <n>] [--dimensions <n>] [--fake] [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'web') { console.log('Usage: knowledge web search <query> [--provider openai|anthropic] [--model provider:model] [--domain <domain>] [--file-results] [--fake] [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'ask' || command === 'build') { console.log('Usage: knowledge ask|build <prompt> [--generate] [--semantic] [--model default|provider:model] [--approve-write] [--scope local|global|project] [--verbose] [--json]'); return; }
+  if (command === 'embeddings') { console.log('Usage: knowledge embeddings status|index|search [query] [--model openai:text-embedding-3-small] [--limit <n>] [--dimensions <n>] [--fake] [--scope local|global|project] [--verbose] [--json]'); return; }
   if (command === 'providers') { console.log('Usage: knowledge providers status|models|check [provider|model-alias] [--scope local|global|project] [--json]'); return; }
   if (command === 'safety') { console.log('Usage: knowledge safety status|check|approve|audit|redact [args] [--scope local|global|project] [--json]'); return; }
   if (command === 'events') { console.log('Usage: knowledge events emit|list|replay [args] [--json]'); return; }
@@ -388,10 +391,47 @@ function useColor(flags: Flags): boolean {
   return process.stdout.isTTY === true;
 }
 
-function output(data: unknown, asJson?: boolean, _flags?: Flags): void {
+function output(data: unknown, asJson?: boolean, flags?: Flags): void {
   if (asJson) { console.log(JSON.stringify(data, null, 2)); return; }
   if (typeof data === 'string') { console.log(data); return; }
-  console.log((data as { message?: string }).message ?? JSON.stringify(data, null, 2));
+  if (flags?.verbose) { console.log(JSON.stringify(data, null, 2)); return; }
+  const message = (data as { message?: string }).message;
+  console.log(message ? `${message}\n${detailHint()}` : compactObjectFallback(data));
+}
+
+function detailHint(details = 'full details'): string {
+  return `Hint: use --verbose for ${details}, or --json for machine-readable output.`;
+}
+
+function truncate(value: unknown, max = 120): string {
+  const text = value === null || value === undefined ? '' : String(value).replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 3))}...`;
+}
+
+function compactObjectFallback(data: unknown): string {
+  if (!data || typeof data !== 'object') return String(data);
+  const record = data as Record<string, any>;
+  const lines = [record.ok === false ? 'Result: not ok' : 'Result: ok'];
+  for (const [key, value] of Object.entries(record).slice(0, 8)) {
+    if (key === 'ok' || key === 'message') continue;
+    if (Array.isArray(value)) lines.push(`${key}: ${value.length} item(s)`);
+    else if (value && typeof value === 'object') lines.push(`${key}: ${Object.keys(value).length} field(s)`);
+    else lines.push(`${key}: ${truncate(value, 100)}`);
+  }
+  lines.push(detailHint());
+  return lines.join('\n');
+}
+
+function formatPaths(paths: Record<string, any>): string {
+  return [
+    `Knowledge paths (${paths.scope})`,
+    `Home: ${paths.home}`,
+    `SQLite: ${paths.knowledge_db_path}`,
+    `JSON store: ${paths.json_store_path}`,
+    `Wiki: ${paths.wiki_dir}`,
+    detailHint('config and all paths'),
+  ].join('\n');
 }
 
 function formatInventory(inventory: ReturnType<ReturnType<typeof createKnowledgeService>['inventory']>): string {
@@ -427,6 +467,207 @@ function formatInventory(inventory: ReturnType<ReturnType<typeof createKnowledge
   pushRows('Sync conflicts', inventory.sync_conflicts, (row) => `${row.id}: ${row.entity_kind}/${row.entity_id} ${row.status}`);
 
   return lines.join('\n');
+}
+
+function formatSearchResults(result: Record<string, any>): string {
+  const rows = Array.isArray(result.results) ? result.results : [];
+  const lines = [
+    `${rows.length} search result(s) for "${truncate(result.query, 80)}"${result.mode?.semantic ? ' (semantic enabled)' : ''}`,
+  ];
+  for (const row of rows.slice(0, result.limit ?? 10)) {
+    const source = row.source?.uri ?? row.provenance?.source_uri ?? row.artifact?.path ?? row.artifact?.uri ?? row.id;
+    const score = typeof row.score === 'number' ? ` score=${row.score.toFixed(3)}` : '';
+    lines.push(`- ${row.kind ?? 'result'} ${truncate(row.title ?? row.id, 80)}${score}`);
+    if (source) lines.push(`  source: ${truncate(source, 120)}`);
+    if (row.text) lines.push(`  text: ${truncate(row.text, 180)}`);
+  }
+  if (rows.length === 0) lines.push('- No matches. Try a broader query or run `knowledge inventory --scope project`.');
+  lines.push(detailHint('scores, provenance, and full result objects'));
+  if (!result.context) lines.push('Next: use --context for an agent-ready citation pack, or --limit <n> to change the result count.');
+  return lines.join('\n');
+}
+
+function formatContextPack(context: Record<string, any>): string {
+  const excerpts = Array.isArray(context.excerpts) ? context.excerpts : [];
+  const citations = Array.isArray(context.citations) ? context.citations : [];
+  const lines = [
+    `${excerpts.length} context excerpt(s) for "${truncate(context.query ?? context.normalized_query, 80)}"`,
+  ];
+  for (const excerpt of excerpts.slice(0, 10)) {
+    const citation = citations.find((entry: any) => entry.id === excerpt.citation_id || entry.result_id === excerpt.result_id);
+    const source = citation?.source_uri ?? citation?.artifact_path ?? excerpt.result_id;
+    const score = typeof excerpt.score === 'number' ? ` score=${excerpt.score.toFixed(3)}` : '';
+    lines.push(`- ${excerpt.kind ?? 'excerpt'} ${truncate(excerpt.id, 44)}${score}`);
+    if (source) lines.push(`  source: ${truncate(source, 120)}`);
+    lines.push(`  text: ${truncate(excerpt.text, 220)}`);
+  }
+  lines.push(`Citations: ${citations.length}`);
+  lines.push(detailHint('citations, graph, notes, and full excerpts'));
+  return lines.join('\n');
+}
+
+function formatSemanticResults(result: Record<string, any>): string {
+  const rows = Array.isArray(result.results) ? result.results : [];
+  const lines = [
+    `${rows.length} semantic result(s) for "${truncate(result.query, 80)}"`,
+    `Index: ${result.provider ?? 'unknown'}:${result.model ?? 'unknown'} (${result.dimensions ?? '?'} dimensions)`,
+  ];
+  for (const row of rows.slice(0, result.limit ?? 10)) {
+    const score = typeof row.score === 'number' ? ` score=${row.score.toFixed(3)}` : '';
+    lines.push(`- ${truncate(row.chunk_id, 44)}${score}`);
+    if (row.source_uri) lines.push(`  source: ${truncate(row.source_uri, 120)}`);
+    if (row.text) lines.push(`  text: ${truncate(row.text, 180)}`);
+  }
+  lines.push(detailHint('provenance and full vector result objects'));
+  return lines.join('\n');
+}
+
+function formatWebSearch(result: Record<string, any>): string {
+  const sources = Array.isArray(result.sources) ? result.sources : [];
+  const lines = [
+    `${sources.length} web source(s) for "${truncate(result.query, 80)}"`,
+    `Provider: ${result.provider ?? 'unknown'}${result.model ? ` (${result.model})` : ''}`,
+  ];
+  for (const source of sources.slice(0, result.limit ?? 10)) {
+    lines.push(`- ${truncate(source.title ?? source.url ?? source.uri ?? 'source', 100)}`);
+    const uri = source.url ?? source.uri ?? source.source_ref;
+    if (uri) lines.push(`  url: ${truncate(uri, 140)}`);
+    if (source.snippet) lines.push(`  snippet: ${truncate(source.snippet, 180)}`);
+  }
+  lines.push(detailHint('provider payloads and filed source refs'));
+  return lines.join('\n');
+}
+
+function formatMachineTopology(topology: Record<string, any>): string {
+  const machines = Array.isArray(topology.machines) ? topology.machines : [];
+  const lines = [
+    `${machines.length} machine(s) discovered via ${topology.source ?? 'unknown'}`,
+    `Adapter: ${topology.adapter?.package ?? '@hasna/machines'} ${topology.adapter?.available ? 'available' : 'unavailable'}`,
+  ];
+  for (const machine of machines.slice(0, 10)) {
+    const local = machine.local ? ' local' : '';
+    const target = machine.tailscale_dns ?? machine.ssh_target ?? machine.hostname ?? '';
+    lines.push(`- ${truncate(machine.machine_id ?? machine.id ?? 'unknown', 48)}${local}${target ? ` -> ${truncate(target, 80)}` : ''}`);
+  }
+  if (machines.length > 10) lines.push(`... ${machines.length - 10} more machine(s).`);
+  if (Array.isArray(topology.warnings) && topology.warnings.length > 0) lines.push(`Warnings: ${topology.warnings.slice(0, 3).join('; ')}`);
+  lines.push(detailHint('full topology, route hints, and adapter evidence'));
+  return lines.join('\n');
+}
+
+function formatMachinePreflight(preflight: Record<string, any>): string {
+  const checks = Array.isArray(preflight.checks) ? preflight.checks : [];
+  const failed = checks.filter((check: any) => check.status === 'fail' || check.severity === 'fail');
+  const warnings = checks.filter((check: any) => check.status === 'warn' || check.severity === 'warn');
+  const lines = [
+    `Machine preflight ${preflight.ok ? 'passed' : 'needs attention'} for ${preflight.machine_id ?? preflight.requested_machine_id ?? 'local'}`,
+    `Checks: ${checks.length} total, ${failed.length} failed, ${warnings.length} warning(s)`,
+  ];
+  for (const check of [...failed, ...warnings].slice(0, 8)) {
+    lines.push(`- ${check.status ?? check.severity ?? 'check'} ${truncate(check.id ?? check.kind ?? 'check', 72)}: ${truncate(check.message ?? check.detail ?? '', 140)}`);
+  }
+  lines.push(detailHint('all checks and repair hints'));
+  return lines.join('\n');
+}
+
+function formatSyncStatus(status: Record<string, any>): string {
+  const lines = [
+    `Sync status (${status.scope ?? 'scope'})`,
+    `Schema: v${status.sqlite_schema_version ?? 'unknown'}`,
+    `Machines: ${status.machines?.total ?? 0}; snapshots: ${status.snapshots?.total ?? 0}; open conflicts: ${status.conflicts?.open ?? 0}`,
+    `Tables: ${Object.entries(status.table_counts ?? {}).slice(0, 8).map(([table, count]) => `${table}=${count}`).join(', ') || 'none'}`,
+    detailHint('registry rows, clocks, snapshots, imports, and conflicts'),
+  ];
+  return lines.join('\n');
+}
+
+function formatSyncDoctor(doctor: Record<string, any>): string {
+  const warnings = Array.isArray(doctor.warnings) ? doctor.warnings : [];
+  const commands = Array.isArray(doctor.recommended_commands) ? doctor.recommended_commands : [];
+  const lines = [
+    doctor.message ?? `Sync readiness ${doctor.ok ? 'ok' : 'needs attention'}`,
+    `Storage: ${doctor.storage?.validation?.ok ? 'ok' : 'needs attention'}; open-files: ${doctor.open_files?.ok ? 'ok' : 'needs attention'}; open conflicts: ${doctor.sync?.open_conflicts ?? 0}`,
+  ];
+  if (warnings.length > 0) lines.push(`Warnings: ${warnings.slice(0, 5).join('; ')}`);
+  for (const command of commands.slice(0, 5)) {
+    lines.push(`- next: ${truncate(command.shell_command ?? command.command?.join(' ') ?? command.id, 160)}`);
+  }
+  lines.push(detailHint('diagnostics, route evidence, and all recommended commands'));
+  return lines.join('\n');
+}
+
+function formatSyncSnapshot(snapshot: Record<string, any>): string {
+  const snap = snapshot.snapshot ?? {};
+  return [
+    `Sync snapshot ${snapshot.ok ? 'recorded' : 'failed'}`,
+    `Snapshot: ${truncate(snap.id ?? snap.snapshot_id ?? 'unknown', 80)} ${snap.content_hash ? `(${truncate(snap.content_hash, 80)})` : ''}`,
+    `Machines upserted: ${snapshot.machines_upserted ?? 0}; machine: ${snapshot.machine_id ?? snap.machine_id ?? 'unknown'}`,
+    detailHint('snapshot payload and topology evidence'),
+  ].join('\n');
+}
+
+function formatSyncConflicts(result: Record<string, any>): string {
+  const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+  const lines = [`${conflicts.length} sync conflict(s)`];
+  for (const conflict of conflicts.slice(0, 10)) {
+    lines.push(`- ${truncate(conflict.id, 48)} ${conflict.status ?? 'unknown'} ${conflict.entity_kind ?? ''}/${truncate(conflict.entity_id, 80)}`);
+  }
+  lines.push('Next: use `knowledge sync conflicts show <id> --json` for one conflict.');
+  lines.push(detailHint('full conflict objects'));
+  return lines.join('\n');
+}
+
+function formatSyncMachines(result: Record<string, any>): string {
+  const machines = Array.isArray(result.machines) ? result.machines : [];
+  const lines = [`${machines.length} registered sync machine(s)`];
+  for (const machine of machines.slice(0, 10)) {
+    lines.push(`- ${truncate(machine.machine_id, 48)} ${truncate(machine.hostname ?? machine.workspace_home ?? '', 100)}`);
+  }
+  lines.push(detailHint('machine registry rows'));
+  return lines.join('\n');
+}
+
+function formatSyncOperation(result: Record<string, any>, action: string): string {
+  const lines = [
+    `Sync ${action} ${result.ok === false ? 'needs attention' : 'completed'}${result.dry_run ? ' (dry run)' : ''}`,
+  ];
+  const summarizeDirection = (name: string, value: any) => {
+    if (!value) return;
+    const tables = Array.isArray(value.tables) ? value.tables : [];
+    const tableWrites = tables.reduce((sum: number, table: any) => sum + (table.inserted ?? 0) + (table.updated ?? 0) + (table.deleted ?? 0), 0);
+    const artifactCopied = value.artifacts?.copied ?? 0;
+    const errors = Array.isArray(value.errors) ? value.errors.length : 0;
+    lines.push(`${name}: ${tableWrites} table row change(s), ${artifactCopied} artifact(s), ${errors} error(s)`);
+  };
+  summarizeDirection('pull', result.pull);
+  summarizeDirection('push', result.push);
+  if (Array.isArray(result.errors) && result.errors.length > 0) lines.push(`Errors: ${result.errors.slice(0, 3).map((error: any) => truncate(error, 120)).join('; ')}`);
+  lines.push(detailHint('per-table rows, artifacts, clocks, and errors'));
+  return lines.join('\n');
+}
+
+function formatPromptResult(result: Record<string, any>): string {
+  const citations = Array.isArray(result.citations) ? result.citations : [];
+  const excerpts = Array.isArray(result.context?.excerpts) ? result.context.excerpts : Array.isArray(result.excerpts) ? result.excerpts : [];
+  const lines = [
+    result.generated ? 'Generated answer with citations' : 'Prepared citation context draft',
+    `Citations: ${citations.length}; excerpts: ${excerpts.length}`,
+  ];
+  if (result.answer) lines.push(`Answer: ${truncate(result.answer, 500)}`);
+  for (const citation of citations.slice(0, 5)) {
+    lines.push(`- ${truncate(citation.source_uri ?? citation.ref ?? citation.id, 120)}`);
+  }
+  lines.push(detailHint('full answer payload, context, citations, and run ledger'));
+  return lines.join('\n');
+}
+
+function formatExportSummary(items: KnowledgeItem[], format: string): string {
+  return [
+    `Export preview: ${items.length} item(s) available`,
+    `Default output is compact to avoid terminal/context bloat.`,
+    `Use --verbose or --json for a JSON object, or --format jsonl for newline-delimited records.`,
+    format !== 'json' ? `Requested format: ${format}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 function machineIsLocal(machine: string | undefined): boolean {
@@ -475,11 +716,11 @@ async function run(argv: string[]): Promise<void> {
   if (flags.completions) {
     const shell = flags.completions;
     if (shell === 'bash') {
-      console.log(`_knowledge() { local cur; cur="${"$"}{COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive --json --yes --help --version --desc --page --limit --search --sort --id --store --title --content --url --tag --format --completions --purpose --model --dimensions --semantic --context --generate --approve-write --provider --mode --machine --workspace --peer-workspace --api-url --canonical-example --api-key --email --org --org-id --user-id --domain --file-results --full --dry-run --fake --no-tailscale --no-artifact-content --no-color --scope --tables --archived --include-archived" -- "$cur")); }; complete -F _knowledge knowledge`);
+      console.log(`_knowledge() { local cur; cur="${"$"}{COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive --json --verbose --yes --help --version --desc --page --limit --search --sort --id --store --title --content --url --tag --format --completions --purpose --model --dimensions --semantic --context --generate --approve-write --provider --mode --machine --workspace --peer-workspace --api-url --canonical-example --api-key --email --org --org-id --user-id --domain --file-results --full --dry-run --fake --no-tailscale --no-artifact-content --no-color --scope --tables --archived --include-archived" -- "$cur")); }; complete -F _knowledge knowledge`);
     } else if (shell === 'zsh') {
-      console.log(`#compdef knowledge\n_knowledge() { _arguments -C "1: :(add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive)" "(--json)--json" "(--yes)-y" "(--help)--help" "(--version)--version" "(--desc)--desc" "(--archived)--archived" "(--include-archived)--include-archived" "(--semantic)--semantic" "(--context)--context" "(--generate)--generate" "(--approve-write)--approve-write" "(--canonical-example)--canonical-example" "(--file-results)--file-results" "(--full)--full" "(--dry-run)--dry-run" "(--fake)--fake" "(--no-tailscale)--no-tailscale" "(--no-artifact-content)--no-artifact-content" "(-p --page)"{-p,--page}"[page number]:number:" "(-l --limit)"{-l,--limit}"[items per page]:number:" "(-s --search)"{-s,--search}"[search text]:text:" "(--sort)--sort"\{created,title\}:" "(--id)--id[item id]:id:" "(--store)--store[store path]:path:" "(--title)--title[new title]:" "(--content)--content[new content]:" "(--url)--url[source url]:" "(-t --tag)"{-t,--tag}"[tag]:tag:" "(--format)--format[json|jsonl]:" "(--completions)--completions[output completions]:shell:(bash zsh fish):" "(--purpose)--purpose[purpose]:" "(--model)--model[model ref]:" "(--dimensions)--dimensions[embedding dimensions]:number:" "(--provider)--provider[provider]:" "(--mode)--mode"\{local,hosted\}:" "(--machine)--machine[machine id or SSH alias]:" "(--workspace)--workspace[repo workspace path]:path:" "(--peer-workspace)--peer-workspace[peer repo or knowledge home path]:path:" "(--api-url)--api-url[hosted API URL]:" "(--api-key)--api-key[hosted API key]:" "(--email)--email[email]:" "(--org)--org[org slug]:" "(--org-id)--org-id[org id]:" "(--user-id)--user-id[user id]:" "(--domain)--domain[domain]:" "(--no-color)--no-color[disable color]" "(--scope)--scope"\{local,global,project\}:" "(--tables)--tables[comma-separated DB sync tables]:" }; _knowledge`);
+      console.log(`#compdef knowledge\n_knowledge() { _arguments -C "1: :(add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive)" "(--json)--json" "(--verbose)--verbose" "(--yes)-y" "(--help)--help" "(--version)--version" "(--desc)--desc" "(--archived)--archived" "(--include-archived)--include-archived" "(--semantic)--semantic" "(--context)--context" "(--generate)--generate" "(--approve-write)--approve-write" "(--canonical-example)--canonical-example" "(--file-results)--file-results" "(--full)--full" "(--dry-run)--dry-run" "(--fake)--fake" "(--no-tailscale)--no-tailscale" "(--no-artifact-content)--no-artifact-content" "(-p --page)"{-p,--page}"[page number]:number:" "(-l --limit)"{-l,--limit}"[items per page]:number:" "(-s --search)"{-s,--search}"[search text]:text:" "(--sort)--sort"\{created,title\}:" "(--id)--id[item id]:id:" "(--store)--store[store path]:path:" "(--title)--title[new title]:" "(--content)--content[new content]:" "(--url)--url[source url]:" "(-t --tag)"{-t,--tag}"[tag]:tag:" "(--format)--format[json|jsonl]:" "(--completions)--completions[output completions]:shell:(bash zsh fish):" "(--purpose)--purpose[purpose]:" "(--model)--model[model ref]:" "(--dimensions)--dimensions[embedding dimensions]:number:" "(--provider)--provider[provider]:" "(--mode)--mode"\{local,hosted\}:" "(--machine)--machine[machine id or SSH alias]:" "(--workspace)--workspace[repo workspace path]:path:" "(--peer-workspace)--peer-workspace[peer repo or knowledge home path]:path:" "(--api-url)--api-url[hosted API URL]:" "(--api-key)--api-key[hosted API key]:" "(--email)--email[email]:" "(--org)--org[org slug]:" "(--org-id)--org-id[org id]:" "(--user-id)--user-id[user id]:" "(--domain)--domain[domain]:" "(--no-color)--no-color[disable color]" "(--scope)--scope"\{local,global,project\}:" "(--tables)--tables[comma-separated DB sync tables]:" }; _knowledge`);
     } else if (shell === 'fish') {
-      console.log(`complete -c knowledge -f; complete -c knowledge -a "add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive"; complete -c knowledge -l json; complete -c knowledge -l yes -s y; complete -c knowledge -l help -s h; complete -c knowledge -l version -s v; complete -c knowledge -l desc; complete -c knowledge -l archived; complete -c knowledge -l include-archived; complete -c knowledge -l semantic; complete -c knowledge -l context; complete -c knowledge -l generate; complete -c knowledge -l approve-write; complete -c knowledge -l canonical-example; complete -c knowledge -l provider; complete -c knowledge -l mode; complete -c knowledge -l machine; complete -c knowledge -l workspace; complete -c knowledge -l peer-workspace; complete -c knowledge -l api-url; complete -c knowledge -l api-key; complete -c knowledge -l email; complete -c knowledge -l org; complete -c knowledge -l org-id; complete -c knowledge -l user-id; complete -c knowledge -l domain; complete -c knowledge -l file-results; complete -c knowledge -l full; complete -c knowledge -l dry-run; complete -c knowledge -l fake; complete -c knowledge -l no-tailscale; complete -c knowledge -l no-artifact-content; complete -c knowledge -s p -l page; complete -c knowledge -s l -l limit; complete -c knowledge -s s -l search; complete -c knowledge -l sort; complete -c knowledge -l id; complete -c knowledge -l store; complete -c knowledge -l title; complete -c knowledge -l content; complete -c knowledge -l url; complete -c knowledge -s t -l tag; complete -c knowledge -l format; complete -c knowledge -l completions; complete -c knowledge -l purpose; complete -c knowledge -l model; complete -c knowledge -l dimensions; complete -c knowledge -l no-color; complete -c knowledge -l scope -a "local global project"; complete -c knowledge -l tables`);
+      console.log(`complete -c knowledge -f; complete -c knowledge -a "add list get update archive restore upsert untag delete export prune dedupe stats inventory paths setup auth remote storage machines sync db wiki source ingest reindex search web ask build embeddings providers safety events webhooks help ls rm edit unarchive"; complete -c knowledge -l json; complete -c knowledge -l verbose; complete -c knowledge -l yes -s y; complete -c knowledge -l help -s h; complete -c knowledge -l version -s v; complete -c knowledge -l desc; complete -c knowledge -l archived; complete -c knowledge -l include-archived; complete -c knowledge -l semantic; complete -c knowledge -l context; complete -c knowledge -l generate; complete -c knowledge -l approve-write; complete -c knowledge -l canonical-example; complete -c knowledge -l provider; complete -c knowledge -l mode; complete -c knowledge -l machine; complete -c knowledge -l workspace; complete -c knowledge -l peer-workspace; complete -c knowledge -l api-url; complete -c knowledge -l api-key; complete -c knowledge -l email; complete -c knowledge -l org; complete -c knowledge -l org-id; complete -c knowledge -l user-id; complete -c knowledge -l domain; complete -c knowledge -l file-results; complete -c knowledge -l full; complete -c knowledge -l dry-run; complete -c knowledge -l fake; complete -c knowledge -l no-tailscale; complete -c knowledge -l no-artifact-content; complete -c knowledge -s p -l page; complete -c knowledge -s l -l limit; complete -c knowledge -s s -l search; complete -c knowledge -l sort; complete -c knowledge -l id; complete -c knowledge -l store; complete -c knowledge -l title; complete -c knowledge -l content; complete -c knowledge -l url; complete -c knowledge -s t -l tag; complete -c knowledge -l format; complete -c knowledge -l completions; complete -c knowledge -l purpose; complete -c knowledge -l model; complete -c knowledge -l dimensions; complete -c knowledge -l no-color; complete -c knowledge -l scope -a "local global project"; complete -c knowledge -l tables`);
     } else {
       throw new Error("Invalid --completions value. Use 'bash', 'zsh', or 'fish'.");
     }
@@ -511,12 +752,13 @@ async function run(argv: string[]): Promise<void> {
       includeArchived: flags.includeArchived || flags.archived,
       storePath,
     });
-    output(flags.json ? inventory : formatInventory(inventory), flags.json);
+    output(flags.json || flags.verbose ? inventory : formatInventory(inventory), flags.json, flags);
     return;
   }
 
   if (command === 'paths') {
-    output(service.paths(), flags.json);
+    const paths = service.paths();
+    output(flags.json || flags.verbose ? paths : formatPaths(paths), flags.json, flags);
     return;
   }
 
@@ -526,7 +768,7 @@ async function run(argv: string[]): Promise<void> {
       apiUrl: flags.apiUrl,
       canonicalExample: flags.canonicalExample,
     });
-    output(result, flags.json);
+    output(result, flags.json, flags);
     return;
   }
 
@@ -534,7 +776,7 @@ async function run(argv: string[]): Promise<void> {
     const action = positional[1] ?? 'whoami';
     if (action === 'whoami' || action === 'status') {
       const result = service.authStatus(process.env);
-      output({ ok: true, ...result, message: result.authenticated ? `Authenticated via ${result.source}` : 'Not authenticated' }, flags.json);
+      output({ ok: true, ...result, message: result.authenticated ? `Authenticated via ${result.source}` : 'Not authenticated' }, flags.json, flags);
       return;
     }
     if (action === 'login') {
@@ -556,12 +798,12 @@ async function run(argv: string[]): Promise<void> {
         api_url: auth.api_url ?? service.authStatus(process.env).api_url,
         auth_path: service.authStatus(process.env).auth_path,
         message: `Saved hosted credentials for ${auth.email ?? 'API key'}`,
-      }, flags.json);
+      }, flags.json, flags);
       return;
     }
     if (action === 'logout') {
       const removed = service.clearAuth(process.env);
-      output({ ok: true, removed, message: removed ? 'Removed hosted credentials' : 'No hosted credentials found' }, flags.json);
+      output({ ok: true, removed, message: removed ? 'Removed hosted credentials' : 'No hosted credentials found' }, flags.json, flags);
       return;
     }
     throw new Error("Invalid auth action. Use 'login', 'whoami', or 'logout'.");
@@ -577,7 +819,7 @@ async function run(argv: string[]): Promise<void> {
         api_url: auth.api_url,
         contract: service.remoteContract(),
         message: `Remote contract v${service.remoteContract().contract_version}`,
-      }, flags.json);
+      }, flags.json, flags);
       return;
     }
     if (action === 'status') {
@@ -593,7 +835,7 @@ async function run(argv: string[]): Promise<void> {
         contract_version: contract.contract_version,
         capabilities: contract.capabilities,
         message: auth.authenticated ? `Remote client ready for ${auth.api_url}` : 'Remote client not authenticated',
-      }, flags.json);
+      }, flags.json, flags);
       return;
     }
     throw new Error("Invalid remote action. Use 'contracts' or 'status'.");
@@ -609,7 +851,7 @@ async function run(argv: string[]): Promise<void> {
         ...contract,
         validation,
         message: `${contract.storage_type} artifact storage at ${contract.artifact_store.uri_prefix}`,
-      }, flags.json);
+      }, flags.json, flags);
       return;
     }
     if (action === 'validate') {
@@ -618,7 +860,7 @@ async function run(argv: string[]): Promise<void> {
         ok: validation.ok,
         validation,
         message: validation.ok ? 'Storage contract valid' : `Storage contract invalid: ${validation.errors.join('; ')}`,
-      }, flags.json);
+      }, flags.json, flags);
       return;
     }
     if (action === 'repair-artifact-keys' || action === 'repair-keys') {
@@ -627,7 +869,7 @@ async function run(argv: string[]): Promise<void> {
         approvedBy: flags.approvedBy,
         dryRun: flags.dryRun,
       });
-      output(repair, flags.json);
+      output(repair, flags.json, flags);
       return;
     }
     throw new Error("Invalid storage action. Use 'status', 'validate', or 'repair-artifact-keys'.");
@@ -639,7 +881,7 @@ async function run(argv: string[]): Promise<void> {
       const topology = await service.machineTopology({
         includeTailscale: flags.tailscale !== false,
       });
-      output(topology, flags.json);
+      output(flags.json || flags.verbose ? topology : formatMachineTopology(topology), flags.json, flags);
       return;
     }
     if (action === 'preflight' || action === 'check') {
@@ -665,7 +907,7 @@ async function run(argv: string[]): Promise<void> {
           },
         ],
       });
-      output(preflight, flags.json);
+      output(flags.json || flags.verbose ? preflight : formatMachinePreflight(preflight), flags.json, flags);
       if (!preflight.ok && !flags.json) process.exitCode = 1;
       return;
     }
@@ -677,7 +919,7 @@ async function run(argv: string[]): Promise<void> {
     const tables = flags.tables ? flags.tables.split(',').map((table) => table.trim()).filter(Boolean) : undefined;
     if (action === 'status') {
       const status = service.syncStatus();
-      output(status, flags.json);
+      output(flags.json || flags.verbose ? status : formatSyncStatus(status), flags.json, flags);
       return;
     }
     if (action === 'doctor' || action === 'readiness' || action === 'preflight') {
@@ -687,10 +929,11 @@ async function run(argv: string[]): Promise<void> {
         includeTailscale: flags.tailscale !== false,
         tables,
       });
-      output({
+      const doctorResult = {
         package: { name: pkg.name, version: pkg.version },
         ...doctor,
-      }, flags.json);
+      };
+      output(flags.json || flags.verbose ? doctorResult : formatSyncDoctor(doctorResult), flags.json, flags);
       if (!doctor.ok && !flags.json) process.exitCode = 1;
       return;
     }
@@ -699,7 +942,7 @@ async function run(argv: string[]): Promise<void> {
         includeTailscale: flags.tailscale !== false,
         machineId: flags.machine,
       });
-      output(snapshot, flags.json);
+      output(flags.json || flags.verbose ? snapshot : formatSyncSnapshot(snapshot), flags.json, flags);
       return;
     }
     if (action === 'conflicts' || action === 'conflict') {
@@ -708,7 +951,7 @@ async function run(argv: string[]): Promise<void> {
         const id = positional[3] ?? flags.id;
         if (!id) throw new Error('Usage: knowledge sync conflicts show <id>');
         const conflict = service.syncConflict(id);
-        output({ ok: true, conflict, message: `Sync conflict ${id}` }, flags.json);
+        output({ ok: true, conflict, message: `Sync conflict ${id}` }, flags.json, flags);
         return;
       }
       if (conflictAction === 'propose' || conflictAction === 'proposal') {
@@ -720,7 +963,7 @@ async function run(argv: string[]): Promise<void> {
               modelRef: flags.model,
               fake: flags.fake,
             })
-          : service.proposeSyncConflictResolution(id), flags.json);
+          : service.proposeSyncConflictResolution(id), flags.json, flags);
         return;
       }
       if (conflictAction === 'resolve') {
@@ -733,7 +976,7 @@ async function run(argv: string[]): Promise<void> {
           approveWrite: flags.approveWrite,
           proposedPatchUri: flags.patchUri,
         });
-        output(result, flags.json);
+        output(result, flags.json, flags);
         if (!result.ok && !flags.json) process.exitCode = 1;
         return;
       }
@@ -741,20 +984,22 @@ async function run(argv: string[]): Promise<void> {
         status: conflictAction,
         limit: flags.limit,
       });
-      output({
+      const conflictsResult = {
         ok: true,
         conflicts,
         message: `${conflicts.length} sync conflict(s)`,
-      }, flags.json);
+      };
+      output(flags.json || flags.verbose ? conflictsResult : formatSyncConflicts(conflictsResult), flags.json, flags);
       return;
     }
     if (action === 'machines' || action === 'registry') {
       const machines = service.syncMachines();
-      output({
+      const machinesResult = {
         ok: true,
         machines,
         message: `${machines.length} registered sync machine(s)`,
-      }, flags.json);
+      };
+      output(flags.json || flags.verbose ? machinesResult : formatSyncMachines(machinesResult), flags.json, flags);
       return;
     }
     if (action === 'export') {
@@ -775,7 +1020,7 @@ async function run(argv: string[]): Promise<void> {
         direction: 'import',
         machineId: flags.machine ?? null,
       });
-      output(result, flags.json);
+      output(flags.json || flags.verbose ? result : formatSyncOperation(result, action), flags.json, flags);
       return;
     }
     if (action === 'dry-run' || action === 'pull' || action === 'push' || action === 'sync') {
@@ -803,7 +1048,7 @@ async function run(argv: string[]): Promise<void> {
             includeArtifactContent: flags.artifactContent !== false,
             machineId: flags.machine ?? null,
           });
-      output(result, flags.json);
+      output(flags.json || flags.verbose ? result : formatSyncOperation(result, action), flags.json, flags);
       if (!result.ok && !flags.json) process.exitCode = 1;
       return;
     }
@@ -814,12 +1059,12 @@ async function run(argv: string[]): Promise<void> {
     const action = positional[1] ?? 'init';
     if (action === 'init') {
       const result = service.initDb();
-      output({ ok: true, ...result, message: `Initialized ${result.path}` }, flags.json);
+      output({ ok: true, ...result, message: `Initialized ${result.path}` }, flags.json, flags);
       return;
     }
     if (action === 'stats') {
       const stats = service.dbStats();
-      output({ ok: true, path: service.workspace.knowledgeDbPath, ...stats, message: `knowledge.db schema v${stats.schema_version}` }, flags.json);
+      output({ ok: true, path: service.workspace.knowledgeDbPath, ...stats, message: `knowledge.db schema v${stats.schema_version}` }, flags.json, flags);
       return;
     }
     if (action === 'storage') {
@@ -831,17 +1076,17 @@ async function run(argv: string[]): Promise<void> {
           ok: true,
           ...status,
           message: `knowledge.db storage mode ${status.mode}${status.activeEnv ? ` via ${status.activeEnv}` : ''}`,
-        }, flags.json);
+        }, flags.json, flags);
         return;
       }
       if (storageAction === 'push') {
         const results = await databaseStoragePush({ scope: flags.scope, tables });
-        output({ ok: syncOk(results), results, message: syncMessage(results, 'push') }, flags.json);
+        output({ ok: syncOk(results), results, message: syncMessage(results, 'push') }, flags.json, flags);
         return;
       }
       if (storageAction === 'pull') {
         const results = await databaseStoragePull({ scope: flags.scope, tables });
-        output({ ok: syncOk(results), results, message: syncMessage(results, 'pull') }, flags.json);
+        output({ ok: syncOk(results), results, message: syncMessage(results, 'pull') }, flags.json, flags);
         return;
       }
       if (storageAction === 'sync') {
@@ -850,7 +1095,7 @@ async function run(argv: string[]): Promise<void> {
           ok: syncOk(result.pull) && syncOk(result.push),
           ...result,
           message: `${syncMessage(result.pull, 'pull')}; ${syncMessage(result.push, 'push')}`,
-        }, flags.json);
+        }, flags.json, flags);
         return;
       }
       throw new Error("Invalid db storage action. Use 'status', 'push', 'pull', or 'sync'.");
@@ -862,7 +1107,7 @@ async function run(argv: string[]): Promise<void> {
     const action = positional[1] ?? 'init';
     if (action === 'init') {
       const result = await service.initWiki();
-      output({ ok: true, ...result, message: `Initialized wiki layout in ${service.workspace.home}` }, flags.json);
+      output({ ok: true, ...result, message: `Initialized wiki layout in ${service.workspace.home}` }, flags.json, flags);
       return;
     }
     if (action === 'compile') {
@@ -875,7 +1120,7 @@ async function run(argv: string[]): Promise<void> {
         sourceRefs: sourceRefs.length > 0 ? sourceRefs : undefined,
         limit: flags.limit,
       });
-      output({ ok: true, ...result, message: `Compiled wiki page ${result.path}` }, flags.json);
+      output({ ok: true, ...result, message: `Compiled wiki page ${result.path}` }, flags.json, flags);
       return;
     }
     if (action === 'file-answer' || action === 'answer') {
@@ -892,12 +1137,12 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result }, flags.json);
+      output({ ok: true, ...result }, flags.json, flags);
       return;
     }
     if (action === 'lint') {
       const result = service.lintWiki();
-      output({ ok: result.ok, ...result, message: result.ok ? 'Wiki lint passed' : `Wiki lint found ${result.issue_count} issue(s)` }, flags.json);
+      output({ ok: result.ok, ...result, message: result.ok ? 'Wiki lint passed' : `Wiki lint found ${result.issue_count} issue(s)` }, flags.json, flags);
       return;
     }
     throw new Error("Invalid wiki action. Use 'init', 'compile', 'file-answer', or 'lint'.");
@@ -921,7 +1166,7 @@ async function run(argv: string[]): Promise<void> {
           redaction: policy.redaction,
           approvals: policy.approvals,
           message: `Safety policy: ${policy.mode}`,
-        }, flags.json);
+        }, flags.json, flags);
         return;
       }
       if (action === 'check') {
@@ -946,7 +1191,7 @@ async function run(argv: string[]): Promise<void> {
             decision: decision.decision === 'allow' ? 'allow' : 'requires_approval',
             metadata: decision,
           });
-          output({ ok: true, ...decision, message: `Safety check ${decision.decision}` }, flags.json);
+          output({ ok: true, ...decision, message: `Safety check ${decision.decision}` }, flags.json, flags);
           return;
         } catch (error) {
           recordAuditEvent(db, {
@@ -975,7 +1220,7 @@ async function run(argv: string[]): Promise<void> {
           decision: 'allow',
           metadata: { approval_id: approval.id },
         });
-        output({ ok: true, ...approval, action: approveAction, target_uri: target, message: `Approved ${approveAction}` }, flags.json);
+        output({ ok: true, ...approval, action: approveAction, target_uri: target, message: `Approved ${approveAction}` }, flags.json, flags);
         return;
       }
       if (action === 'audit') {
@@ -998,7 +1243,7 @@ async function run(argv: string[]): Promise<void> {
           metadata: JSON.parse(row.metadata_json),
           created_at: row.created_at,
         }));
-        output({ ok: true, events: rows, message: `${rows.length} audit event(s)` }, flags.json);
+        output({ ok: true, events: rows, message: `${rows.length} audit event(s)` }, flags.json, flags);
         return;
       }
       if (action === 'redact') {
@@ -1019,7 +1264,7 @@ async function run(argv: string[]): Promise<void> {
           decision: result.findings.length > 0 ? 'redacted' : 'allow',
           metadata: { findings: result.findings.length },
         });
-        output({ ok: true, text: result.text, findings: result.findings, message: `Redacted ${result.findings.length} finding(s)` }, flags.json);
+        output({ ok: true, text: result.text, findings: result.findings, message: `Redacted ${result.findings.length} finding(s)` }, flags.json, flags);
         return;
       }
       throw new Error("Invalid safety action. Use 'status', 'check', 'approve', 'audit', or 'redact'.");
@@ -1043,7 +1288,7 @@ async function run(argv: string[]): Promise<void> {
       message: result.resolved
         ? `Resolved ${result.source_ref} (${result.content.chunks_returned}/${result.content.chunks_total} chunks)`
         : `Source not indexed: ${sourceRef}`,
-    }, flags.json);
+    }, flags.json, flags);
     return;
   }
 
@@ -1053,14 +1298,14 @@ async function run(argv: string[]): Promise<void> {
       const input = positional[2];
       if (!input) throw new Error('Usage: knowledge ingest manifest <file|s3://bucket/key>');
       const result = await service.ingestManifest(input);
-      output({ ok: true, ...result, message: `Ingested ${result.items_seen} manifest item(s)` }, flags.json);
+      output({ ok: true, ...result, message: `Ingested ${result.items_seen} manifest item(s)` }, flags.json, flags);
       return;
     }
     if (action === 'source') {
       const sourceRef = positional[2];
       if (!sourceRef) throw new Error('Usage: knowledge ingest source <source-ref>');
       const result = await service.ingestSource(sourceRef, flags.purpose);
-      output({ ok: true, ...result, message: `Ingested source ${result.source_ref} (${result.chunks_inserted} chunks)` }, flags.json);
+      output({ ok: true, ...result, message: `Ingested source ${result.source_ref} (${result.chunks_inserted} chunks)` }, flags.json, flags);
       return;
     }
     throw new Error("Invalid ingest action. Use 'manifest' or 'source'.");
@@ -1074,7 +1319,7 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result, message: `${result.missing_embeddings} chunk(s) missing embeddings` }, flags.json);
+      output({ ok: true, ...result, message: `${result.missing_embeddings} chunk(s) missing embeddings` }, flags.json, flags);
       return;
     }
     if (action === 'enqueue') {
@@ -1083,7 +1328,7 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result, message: `Queued ${result.enqueued} embedding refresh item(s)` }, flags.json);
+      output({ ok: true, ...result, message: `Queued ${result.enqueued} embedding refresh item(s)` }, flags.json, flags);
       return;
     }
     if (action === 'embeddings') {
@@ -1094,14 +1339,14 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result, message: `Embedded ${result.indexed.chunks_embedded} chunk(s)` }, flags.json);
+      output({ ok: true, ...result, message: `Embedded ${result.indexed.chunks_embedded} chunk(s)` }, flags.json, flags);
       return;
     }
     if (action === 'outbox') {
       const input = positional[2];
       if (!input) throw new Error('Usage: knowledge reindex outbox <file|s3://bucket/key>');
       const result = await service.consumeOutbox(input);
-      output({ ok: true, ...result, message: `Consumed ${result.events_seen} outbox event(s)` }, flags.json);
+      output({ ok: true, ...result, message: `Consumed ${result.events_seen} outbox event(s)` }, flags.json, flags);
       return;
     }
     throw new Error("Invalid reindex action. Use 'status', 'enqueue', 'embeddings', or 'outbox'.");
@@ -1111,7 +1356,7 @@ async function run(argv: string[]): Promise<void> {
     const action = positional[1] ?? 'status';
     if (action === 'status') {
       const result = service.embeddingStatus();
-      output({ ok: true, ...result, message: `${result.total_vector_entries} vector index entries` }, flags.json);
+      output({ ok: true, ...result, message: `${result.total_vector_entries} vector index entries` }, flags.json, flags);
       return;
     }
     if (action === 'index') {
@@ -1121,7 +1366,7 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result, message: `Embedded ${result.chunks_embedded} chunk(s)` }, flags.json);
+      output({ ok: true, ...result, message: `Embedded ${result.chunks_embedded} chunk(s)` }, flags.json, flags);
       return;
     }
     if (action === 'search') {
@@ -1134,7 +1379,8 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...result, message: `${result.results.length} semantic result(s)` }, flags.json);
+      const semanticResult = { ok: true, ...result, message: `${result.results.length} semantic result(s)` };
+      output(flags.json || flags.verbose ? semanticResult : formatSemanticResults(semanticResult), flags.json, flags);
       return;
     }
     throw new Error("Invalid embeddings action. Use 'status', 'index', or 'search'.");
@@ -1152,7 +1398,8 @@ async function run(argv: string[]): Promise<void> {
         dimensions: flags.dimensions,
         fake: flags.fake,
       });
-      output({ ok: true, ...context, message: `${context.excerpts.length} context excerpt(s)` }, flags.json);
+      const contextResult = { ok: true, ...context, message: `${context.excerpts.length} context excerpt(s)` };
+      output(flags.json || flags.verbose ? contextResult : formatContextPack(contextResult), flags.json, flags);
       return;
     }
     const result = await service.search({
@@ -1163,7 +1410,8 @@ async function run(argv: string[]): Promise<void> {
       dimensions: flags.dimensions,
       fake: flags.fake,
     });
-    output({ ok: true, ...result, message: `${result.results.length} search result(s)` }, flags.json);
+    const searchResult = { ok: true, ...result, message: `${result.results.length} search result(s)` };
+    output(flags.json || flags.verbose ? searchResult : formatSearchResults(searchResult), flags.json, flags);
     return;
   }
 
@@ -1181,7 +1429,8 @@ async function run(argv: string[]): Promise<void> {
       fake: flags.fake,
       fileResults: flags.fileResults,
     });
-    output({ ok: true, ...result, message: `${result.sources.length} web source(s)` }, flags.json);
+    const webResult = { ok: true, ...result, message: `${result.sources.length} web source(s)` };
+    output(flags.json || flags.verbose ? webResult : formatWebSearch(webResult), flags.json, flags);
     return;
   }
 
@@ -1198,7 +1447,8 @@ async function run(argv: string[]): Promise<void> {
       generate: flags.generate,
       approveWrite: flags.approveWrite,
     });
-    output({ ok: true, ...result, message: result.generated ? 'Generated answer with citations' : 'Prepared citation context draft' }, flags.json);
+    const promptResult = { ok: true, ...result, message: result.generated ? 'Generated answer with citations' : 'Prepared citation context draft' };
+    output(flags.json || flags.verbose ? promptResult : formatPromptResult(promptResult), flags.json, flags);
     return;
   }
 
@@ -1207,12 +1457,12 @@ async function run(argv: string[]): Promise<void> {
     if (action === 'status') {
       const status = service.providerStatus();
       const configured = status.providers.filter((entry) => entry.configured).length;
-      output({ ok: true, ...status, message: `${configured}/${status.providers.length} provider credential(s) configured` }, flags.json);
+      output({ ok: true, ...status, message: `${configured}/${status.providers.length} provider credential(s) configured` }, flags.json, flags);
       return;
     }
     if (action === 'models') {
       const models = service.modelRegistry();
-      output({ ok: true, models, message: `${models.length} model alias(es)` }, flags.json);
+      output({ ok: true, models, message: `${models.length} model alias(es)` }, flags.json, flags);
       return;
     }
     if (action === 'check') {
@@ -1220,7 +1470,7 @@ async function run(argv: string[]): Promise<void> {
       const modelRef = resolveModelRef(target, service.config());
       const parsed = parseModelRef(modelRef);
       const credential = assertProviderCredentials(parsed.provider as AiProviderId, service.config());
-      output({ ok: true, target, model_ref: modelRef, provider: parsed.provider, model: parsed.model, credential, message: `${parsed.provider} credentials configured` }, flags.json);
+      output({ ok: true, target, model_ref: modelRef, provider: parsed.provider, model: parsed.model, credential, message: `${parsed.provider} credentials configured` }, flags.json, flags);
       return;
     }
     throw new Error("Invalid providers action. Use 'status', 'models', or 'check'.");
@@ -1246,7 +1496,7 @@ async function run(argv: string[]): Promise<void> {
       db.items.push(item);
       saveStore(storePath, db);
       log('info', 'Item added', { id: item.id, title: item.title });
-      output({ ok: true, item, message: `Added ${item.id}` }, flags.json);
+      output({ ok: true, item, message: `Added ${item.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1274,22 +1524,26 @@ async function run(argv: string[]): Promise<void> {
       const start = (page - 1) * limit;
       const rows = sorted.slice(start, start + limit);
       const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
+      const result = { ok: true, page, limit, total: sorted.length, total_pages: totalPages, sort, direction, items: rows };
 
-      if (useJson) { output({ ok: true, page, limit, total: sorted.length, total_pages: totalPages, sort, direction, items: rows }, true); return; }
+      if (useJson) { output(result, true); return; }
+      if (flags.verbose) { output(result, false, flags); return; }
       if (rows.length === 0) { output(`No items found (search=${search || 'none'}, tag=${tag || 'none'})`, false); return; }
       if (useTable) {
         const col = (v: string) => v;
         const header = `${col('ID')}\t${col('TITLE')}\t${col('CREATED')}\t${col('URL')}\t${col('TAGS')}`;
         console.log(header);
         for (const row of rows) {
-          console.log(`${row.id}\t${col(row.title)}\t${row.created_at}\t${row.url ? col(row.url) : ''}\t${row.tags?.length ? col(`[${row.tags.join(', ')}]`) : ''}`);
+          console.log(`${row.id}\t${col(truncate(row.title, 80))}\t${row.created_at}\t${row.url ? col(truncate(row.url, 90)) : ''}\t${row.tags?.length ? col(truncate(`[${row.tags.join(', ')}]`, 80)) : ''}`);
         }
         console.log(`Page ${page}/${totalPages} | showing ${rows.length} of ${sorted.length} | sort=${sort} ${direction} | search=${search || 'none'} | tag=${tag || 'none'}`);
+        console.log('Hint: use `knowledge get --id <id> --json` for full item content.');
       } else {
         for (const row of rows) {
-          console.log(`${row.id}\t${row.title}\t${row.created_at}${row.url ? `\t${row.url}` : ''}${row.tags?.length ? `\t[${row.tags.join(', ')}]` : ''}`);
+          console.log(`${row.id}\t${truncate(row.title, 80)}\t${row.created_at}${row.url ? `\t${truncate(row.url, 90)}` : ''}${row.tags?.length ? `\t${truncate(`[${row.tags.join(', ')}]`, 80)}` : ''}`);
         }
         console.log(`Page ${page}/${totalPages} | showing ${rows.length} of ${sorted.length} | sort=${sort} ${direction} | search=${search || 'none'} | tag=${tag || 'none'}`);
+        console.log('Hint: use `knowledge get --id <id> --json` for full item content.');
       }
     });
     return;
@@ -1301,7 +1555,7 @@ async function run(argv: string[]): Promise<void> {
       const db = loadStore(storePath);
       const item = db.items.find((x) => x.id === flags.id || x.short_id === flags.id);
       if (!item) throw new Error(`Item not found: ${flags.id}`);
-      output({ ok: true, item, message: `${item.id}: ${item.title}` }, flags.json);
+      output({ ok: true, item, message: `${item.id}: ${item.title}` }, flags.json, flags);
     });
     return;
   }
@@ -1325,7 +1579,7 @@ async function run(argv: string[]): Promise<void> {
       item.updated_at = new Date().toISOString();
       db.items[idx] = item;
       saveStore(storePath, db);
-      output({ ok: true, item, message: `Updated ${item.id}` }, flags.json);
+      output({ ok: true, item, message: `Updated ${item.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1341,7 +1595,7 @@ async function run(argv: string[]): Promise<void> {
       item.updated_at = new Date().toISOString();
       db.items[idx] = item;
       saveStore(storePath, db);
-      output({ ok: true, item, message: `${command === 'archive' ? 'Archived' : 'Restored'} ${item.id}` }, flags.json);
+      output({ ok: true, item, message: `${command === 'archive' ? 'Archived' : 'Restored'} ${item.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1359,7 +1613,7 @@ async function run(argv: string[]): Promise<void> {
       item.updated_at = new Date().toISOString();
       db.items[idx] = item;
       saveStore(storePath, db);
-      output({ ok: true, item, removed: before - item.tags.length, message: `Removed tag from ${item.id}` }, flags.json);
+      output({ ok: true, item, removed: before - item.tags.length, message: `Removed tag from ${item.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1388,7 +1642,7 @@ async function run(argv: string[]): Promise<void> {
         };
         db.items.push(item);
         saveStore(storePath, db);
-        output({ ok: true, created: true, item, message: `Upserted ${item.id}` }, flags.json);
+        output({ ok: true, created: true, item, message: `Upserted ${item.id}` }, flags.json, flags);
         return;
       }
       const item = db.items[idx];
@@ -1402,7 +1656,7 @@ async function run(argv: string[]): Promise<void> {
       item.updated_at = now;
       db.items[idx] = item;
       saveStore(storePath, db);
-      output({ ok: true, created: false, item, message: `Upserted ${item.id}` }, flags.json);
+      output({ ok: true, created: false, item, message: `Upserted ${item.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1418,7 +1672,7 @@ async function run(argv: string[]): Promise<void> {
       saveStore(storePath, db);
       if (!deleted) throw new Error(`Item not found: ${flags.id}`);
       log('info', 'Item deleted', { id: flags.id });
-      output({ ok: true, deleted_id: flags.id, message: `Deleted ${flags.id}` }, flags.json);
+      output({ ok: true, deleted_id: flags.id, message: `Deleted ${flags.id}` }, flags.json, flags);
     });
     return;
   }
@@ -1430,8 +1684,10 @@ async function run(argv: string[]): Promise<void> {
       const db = loadStore(storePath);
       if (format === 'jsonl') {
         for (const item of db.items) console.log(JSON.stringify(item));
+      } else if (flags.json || flags.format === 'json' || flags.verbose) {
+        output({ ok: true, items: db.items }, flags.json || flags.format === 'json', flags);
       } else {
-        output({ ok: true, items: db.items }, flags.json);
+        output(formatExportSummary(db.items, format), false);
       }
     });
     return;
@@ -1453,7 +1709,7 @@ async function run(argv: string[]): Promise<void> {
       const pruned = before - db.items.length;
       saveStore(storePath, db);
       log('info', 'Prune completed', { pruned, remaining: db.items.length });
-      output({ ok: true, pruned, remaining: db.items.length, message: `Pruned ${pruned} item(s)` }, flags.json);
+      output({ ok: true, pruned, remaining: db.items.length, message: `Pruned ${pruned} item(s)` }, flags.json, flags);
     });
     return;
   }
@@ -1473,7 +1729,7 @@ async function run(argv: string[]): Promise<void> {
       const removed = before - db.items.length;
       saveStore(storePath, db);
       log('info', 'Dedupe completed', { removed, remaining: db.items.length });
-      output({ ok: true, removed, remaining: db.items.length, message: `Dedupe removed ${removed} duplicate(s)` }, flags.json);
+      output({ ok: true, removed, remaining: db.items.length, message: `Dedupe removed ${removed} duplicate(s)` }, flags.json, flags);
     });
     return;
   }
@@ -1505,7 +1761,7 @@ async function run(argv: string[]): Promise<void> {
         newest,
         top_tags: topTags,
         message: `${total} items | ${withUrl} with URL | ${withTags} with tags`,
-      }, flags.json);
+      }, flags.json, flags);
     });
     return;
   }
