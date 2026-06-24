@@ -23,7 +23,7 @@ describe('knowledge storage contract', () => {
 
     expect(validation.ok).toBe(true);
     expect(contract.scope).toBe('project');
-    expect(contract.local_layout.app_path).toBe(join('.hasna', 'apps', 'knowledge'));
+    expect(contract.local_layout.app_path).toBe('.hasna/apps/knowledge');
     expect(contract.local_layout.knowledge_db_path).toBe(join(workspace.home, 'knowledge.db'));
     expect(contract.artifact_store.type).toBe('local');
     expect(contract.artifact_store.uri_prefix).toBe(`file://${workspace.artifactsDir}/`);
@@ -42,7 +42,7 @@ describe('knowledge storage contract', () => {
     expect(contract.generated_artifacts.map((entry) => entry.prefix)).toContain('wiki/');
     expect(contract.scalability.indexes).toContain('not one giant index.md');
     expect(contract.canonical_example.active).toBe(false);
-    expect(contract.canonical_example.local_path).toBe(join('.hasna', 'apps', 'knowledge'));
+    expect(contract.canonical_example.local_path).toBe('.hasna/apps/knowledge');
     expect(contract.canonical_example.s3).toMatchObject({
       bucket: 'example-knowledge-prod',
       region: 'us-east-1',

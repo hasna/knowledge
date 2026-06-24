@@ -16,6 +16,10 @@ function pathEnv(bin: string): string {
   return [bin, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
 }
 
+function fakeSshPath(bin: string): string {
+  return process.platform === 'win32' ? join(bin, 'ssh.cmd') : join(bin, 'ssh');
+}
+
 function writeFakeSshBin(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -313,12 +317,14 @@ describe('public knowledge sdk', () => {
     writeFakeMachinesRouteBin(bin, 'sdk-linux-node-a.tailnet.test');
     const oldEnv = {
       PATH: process.env.PATH,
+      KNOWLEDGE_SSH_BIN: process.env.KNOWLEDGE_SSH_BIN,
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON,
       KNOWLEDGE_FAKE_SSH_IMPORT_JSON: process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON,
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: process.env.KNOWLEDGE_FAKE_SSH_TARGET_PATH,
     };
     try {
       process.env.PATH = pathEnv(bin);
+      process.env.KNOWLEDGE_SSH_BIN = fakeSshPath(bin);
       process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON = JSON.stringify(emptySyncBundle());
       process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON = JSON.stringify(emptyImportResult());
       process.env.KNOWLEDGE_FAKE_SSH_TARGET_PATH = targetPath;
@@ -370,6 +376,8 @@ describe('public knowledge sdk', () => {
     } finally {
       if (oldEnv.PATH === undefined) delete process.env.PATH;
       else process.env.PATH = oldEnv.PATH;
+      if (oldEnv.KNOWLEDGE_SSH_BIN === undefined) delete process.env.KNOWLEDGE_SSH_BIN;
+      else process.env.KNOWLEDGE_SSH_BIN = oldEnv.KNOWLEDGE_SSH_BIN;
       if (oldEnv.KNOWLEDGE_FAKE_SSH_EXPORT_JSON === undefined) delete process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON;
       else process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON = oldEnv.KNOWLEDGE_FAKE_SSH_EXPORT_JSON;
       if (oldEnv.KNOWLEDGE_FAKE_SSH_IMPORT_JSON === undefined) delete process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON;
@@ -387,6 +395,7 @@ describe('public knowledge sdk', () => {
     writeFakeMachinesRouteBin(bin, 'sdk-linux-node-a.tailnet.test');
     const oldEnv = {
       PATH: process.env.PATH,
+      KNOWLEDGE_SSH_BIN: process.env.KNOWLEDGE_SSH_BIN,
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON,
       KNOWLEDGE_FAKE_SSH_IMPORT_JSON: process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON,
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: process.env.KNOWLEDGE_FAKE_SSH_TARGET_PATH,
@@ -394,6 +403,7 @@ describe('public knowledge sdk', () => {
     };
     try {
       process.env.PATH = pathEnv(bin);
+      process.env.KNOWLEDGE_SSH_BIN = fakeSshPath(bin);
       process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON = JSON.stringify(emptySyncBundle());
       process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON = JSON.stringify(emptyImportResult(false));
       process.env.KNOWLEDGE_FAKE_SSH_TARGET_PATH = targetPath;
@@ -490,6 +500,8 @@ describe('public knowledge sdk', () => {
     } finally {
       if (oldEnv.PATH === undefined) delete process.env.PATH;
       else process.env.PATH = oldEnv.PATH;
+      if (oldEnv.KNOWLEDGE_SSH_BIN === undefined) delete process.env.KNOWLEDGE_SSH_BIN;
+      else process.env.KNOWLEDGE_SSH_BIN = oldEnv.KNOWLEDGE_SSH_BIN;
       if (oldEnv.KNOWLEDGE_FAKE_SSH_EXPORT_JSON === undefined) delete process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON;
       else process.env.KNOWLEDGE_FAKE_SSH_EXPORT_JSON = oldEnv.KNOWLEDGE_FAKE_SSH_EXPORT_JSON;
       if (oldEnv.KNOWLEDGE_FAKE_SSH_IMPORT_JSON === undefined) delete process.env.KNOWLEDGE_FAKE_SSH_IMPORT_JSON;

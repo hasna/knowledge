@@ -79,6 +79,10 @@ function pathEnv(bin: string): string {
   return [bin, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
 }
 
+function fakeSshPath(bin: string): string {
+  return process.platform === 'win32' ? join(bin, 'ssh.cmd') : join(bin, 'ssh');
+}
+
 function writeFakeSshBin(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -1269,6 +1273,7 @@ describe('knowledge cli', () => {
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json'], dir, {
       PATH: pathEnv(bin),
+      KNOWLEDGE_SSH_BIN: fakeSshPath(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(oldBundle),
     });
 
@@ -1303,6 +1308,7 @@ describe('knowledge cli', () => {
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json'], dir, {
       PATH: pathEnv(bin),
+      KNOWLEDGE_SSH_BIN: fakeSshPath(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(bundle),
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,
     });
@@ -1360,6 +1366,7 @@ describe('knowledge cli', () => {
 
     const result = runCli(['sync', 'pull', '--machine', 'linux-node-a', '--scope', 'project', '--json'], dir, {
       PATH: pathEnv(bin),
+      KNOWLEDGE_SSH_BIN: fakeSshPath(bin),
       KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(bundle),
       KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,
     });
@@ -1411,6 +1418,7 @@ describe('knowledge cli', () => {
 
     const result = runCli(['sync', 'push', '--machine', 'linux-node-a', '--peer-workspace', '/remote/open-knowledge', '--scope', 'project', '--json', '--dry-run'], dir, {
       PATH: pathEnv(bin),
+      KNOWLEDGE_SSH_BIN: fakeSshPath(bin),
       KNOWLEDGE_FAKE_SSH_IMPORT_JSON: JSON.stringify(oldImportResult),
       KNOWLEDGE_FAKE_SSH_STDIN_PATH: stdinPath,
     });

@@ -29,6 +29,10 @@ function pathEnv(bin: string): string {
   return [bin, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
 }
 
+function fakeSshPath(bin: string): string {
+  return process.platform === 'win32' ? join(bin, 'ssh.cmd') : join(bin, 'ssh');
+}
+
 function writeFakeSshBin(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -229,6 +233,7 @@ describe('knowledge MCP', () => {
       env: {
         ...process.env,
         PATH: pathEnv(fakeBin),
+        KNOWLEDGE_SSH_BIN: fakeSshPath(fakeBin),
         KNOWLEDGE_FAKE_SSH_EXPORT_JSON: JSON.stringify(emptySyncBundle()),
         KNOWLEDGE_FAKE_SSH_IMPORT_JSON: JSON.stringify(emptyImportResult()),
         KNOWLEDGE_FAKE_SSH_TARGET_PATH: targetPath,

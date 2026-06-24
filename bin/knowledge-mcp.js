@@ -24616,7 +24616,8 @@ function doctorRecommendations(input) {
   return commands;
 }
 function runSshCommand(machine, command, input, resolved) {
-  const result = spawnSync2("ssh", [resolved.target, command], {
+  const sshBin = process.env.KNOWLEDGE_SSH_BIN || "ssh";
+  const result = spawnSync2(sshBin, [resolved.target, command], {
     encoding: "utf8",
     env: process.env,
     input,
