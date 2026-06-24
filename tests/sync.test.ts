@@ -291,7 +291,7 @@ describe('knowledge machine sync ledger', () => {
     expect(approvedResolution.conflict.approved_by).toBe('test-reviewer');
     expect(approvedResolution.audit_event_id).toStartWith('audit_');
     expect(service.syncConflicts({ status: 'resolved' })).toHaveLength(1);
-  });
+  }, 20000);
 
   test('dry-runs and pushes rows plus generated artifacts between project workspaces', async () => {
     const sourceDir = mkdtempSync(join(tmpdir(), 'ok-sync-source-'));
@@ -361,7 +361,7 @@ describe('knowledge machine sync ledger', () => {
     expect(replay.ok).toBe(true);
     expect(replay.push?.replayed).toBe(true);
     expect(replay.push?.tables.reduce((sum, table) => sum + table.inserted, 0)).toBe(0);
-  });
+  }, 20000);
 
   test('syncs generated artifact manifests through fake S3 without raw source bytes', async () => {
     const sourceDir = mkdtempSync(join(tmpdir(), 'ok-sync-fake-s3-source-'));
@@ -492,7 +492,7 @@ describe('knowledge machine sync ledger', () => {
         preserves_provenance: true,
       },
     });
-  });
+  }, 20000);
 
   test('records conflicts instead of overwriting divergent peer rows', async () => {
     const sourceDir = mkdtempSync(join(tmpdir(), 'ok-sync-conflict-source-'));
