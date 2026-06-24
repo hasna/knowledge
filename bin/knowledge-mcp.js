@@ -26302,6 +26302,37 @@ function sortItems(items, sort = "created", desc = false) {
 function activeItems(items, includeArchived) {
   return includeArchived ? items : items.filter((item) => !item.archived);
 }
+function truncateText(value, max = 160) {
+  const text = value === null || value === undefined ? "" : String(value).replace(/\s+/g, " ").trim();
+  if (text.length <= max)
+    return text;
+  return `${text.slice(0, Math.max(0, max - 3))}...`;
+}
+function compactItem(item, options = {}) {
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const metadataKeys = Object.keys(metadata);
+  const row = {
+    id: item.id,
+    short_id: item.short_id,
+    title: truncateText(item.title, 120),
+    url: item.url ? truncateText(item.url, 160) : null,
+    tags: tags.slice(0, 12).map((tag) => truncateText(tag, 48)),
+    tag_count: tags.length,
+    archived: item.archived ?? false,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    content_preview: truncateText(item.content, 160),
+    content_length: item.content?.length ?? 0,
+    metadata_keys: metadataKeys.slice(0, 20).map((key) => truncateText(key, 64)),
+    metadata_key_count: metadataKeys.length
+  };
+  if (options.includeContent)
+    row.content = item.content;
+  if (options.includeMetadata)
+    row.metadata = metadata;
+  return row;
+}
 function limitNumber(value, fallback = 20, max = 100) {
   if (!Number.isFinite(value) || value <= 0)
     return fallback;
@@ -27428,17 +27459,19 @@ function buildServer() {
     });
     return jsonText({ ok: true, item, message: `Added ${item.id}` });
   });
-  registerTool(server, "ok_list", "List knowledge items", "List items with pagination, search, tag filtering, and sorting", {
+  registerTool(server, "ok_list", "List knowledge items", "List compact item summaries with pagination, search, tag filtering, and sorting", {
     search: exports_external.string().optional().describe("Search text for title/content"),
     tag: exports_external.array(exports_external.string()).optional().describe("Filter by tags; item must match all tags"),
     include_archived: exports_external.boolean().optional().describe("Include archived items"),
+    include_content: exports_external.boolean().optional().describe("Include full item content in each list row; default false to keep agent output compact"),
+    include_metadata: exports_external.boolean().optional().describe("Include full item metadata in each list row; default false to keep agent output compact"),
     page: exports_external.number().optional().describe("Page number"),
     limit: exports_external.number().optional().describe("Items per page"),
     sort: exports_external.enum(["created", "title"]).optional().describe("Sort field"),
     desc: exports_external.boolean().optional().describe("Sort descending"),
     store_path: storePathField,
     scope: scopeField
-  }, async ({ search, tag, include_archived, page, limit, sort, desc, store_path, scope }) => {
+  }, async ({ search, tag, include_archived, include_content, include_metadata, page, limit, sort, desc, store_path, scope }) => {
     const storePath = resolveStorePath(store_path, scope);
     return readStoreLocked(storePath, (db) => {
       const q = search ? search.toLowerCase() : "";
@@ -27457,13 +27490,18 @@ function buildServer() {
       const sorted = sortItems(items, sort ?? "created", desc ?? false);
       const start = (p - 1) * l;
       const rows = sorted.slice(start, start + l);
+      const compactRows = rows.map((item) => compactItem(item, {
+        includeContent: include_content === true,
+        includeMetadata: include_metadata === true
+      }));
       return jsonText({
         ok: true,
         page: p,
         limit: l,
         total: sorted.length,
         total_pages: Math.max(1, Math.ceil(sorted.length / l)),
-        items: rows
+        items: compactRows,
+        detail_hint: "Use ok_get with an id for full item details, or set include_content/include_metadata for expanded list rows."
       });
     });
   });
