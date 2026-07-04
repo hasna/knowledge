@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKnowledgeService } from '../src/service';
+
+function normalizeDarwinPath(path: string): string {
+  return path.replace(/^\/private(?=\/var\/)/, '');
+}
 
 describe('knowledge service facade', () => {
   test('resolves project workspace and shares source ingest/resolve operations', async () => {
@@ -13,7 +17,7 @@ describe('knowledge service facade', () => {
     const sourceRef = `file://${source}`;
 
     const paths = service.paths();
-    expect(paths.home).toBe(join(realpathSync(dir), '.hasna', 'knowledge'));
+    expect(normalizeDarwinPath(paths.home)).toBe(normalizeDarwinPath(join(dir, '.hasna', 'knowledge')));
     expect(paths.config.storage.type).toBe('local');
     expect(service.storageContract().source_ownership.raw_source_bytes_stored_in_open_knowledge).toBe(false);
     expect(service.validateStorage().ok).toBe(true);

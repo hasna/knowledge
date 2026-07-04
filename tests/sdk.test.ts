@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import {
@@ -19,6 +19,10 @@ function writeWindowsCmdShim(bin: string, name: string): void {
     'exit /b %ERRORLEVEL%',
     '',
   ].join('\r\n'));
+}
+
+function normalizeDarwinPath(path: string): string {
+  return path.replace(/^\/private(?=\/var\/)/, '');
 }
 
 function writeFakeSshJs(bin: string): void {
@@ -267,7 +271,7 @@ describe('public knowledge sdk', () => {
     const client = createKnowledgeClient({ scope: 'project', cwd: dir });
 
     const paths = client.paths();
-    expect(paths.home).toBe(join(realpathSync(dir), '.hasna', 'knowledge'));
+    expect(normalizeDarwinPath(paths.home)).toBe(normalizeDarwinPath(join(dir, '.hasna', 'knowledge')));
     expect(paths.exists).toBe(false);
     expect(paths.knowledge_db_exists).toBe(false);
     expect(existsSync(join(dir, '.hasna', 'knowledge'))).toBe(false);
@@ -302,7 +306,7 @@ describe('public knowledge sdk', () => {
     expect(EXAMPLE_KNOWLEDGE_CANONICAL.source_owner).toBe('open-files');
 
     const paths = client.paths();
-    expect(paths.home).toBe(join(realpathSync(dir), '.hasna', 'knowledge'));
+    expect(normalizeDarwinPath(paths.home)).toBe(normalizeDarwinPath(join(dir, '.hasna', 'knowledge')));
     expect(paths.config.storage.type).toBe('local');
 
     const setup = client.setup({ mode: 'hosted', canonicalExample: true });

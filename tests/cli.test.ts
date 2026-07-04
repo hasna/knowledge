@@ -81,8 +81,12 @@ function expectSameExistingPath(actual: string, expected: string): void {
   expect(realpathSync(actual)).toBe(realpathSync(expected));
 }
 
+function normalizeDarwinPath(path: string): string {
+  return path.replace(/^\/private(?=\/var\/)/, '');
+}
+
 function expectedProjectKnowledgeHome(projectDir: string): string {
-  return join(realpathSync(projectDir), '.hasna', 'knowledge');
+  return normalizeDarwinPath(join(realpathSync(projectDir), '.hasna', 'knowledge'));
 }
 
 function createSchema7KnowledgeDb(dbPath: string): void {
@@ -557,7 +561,7 @@ describe('knowledge cli', () => {
     const paths = runCli(['paths', '--scope', 'project', '--json'], dir);
     expect(paths.exitCode).toBe(0);
     const pathsOut = JSON.parse(new TextDecoder().decode(paths.stdout));
-    expect(pathsOut.home).toBe(expectedProjectKnowledgeHome(dir));
+    expect(normalizeDarwinPath(pathsOut.home)).toBe(expectedProjectKnowledgeHome(dir));
     expect(pathsOut.exists).toBe(false);
     expect(pathsOut.config_exists).toBe(false);
     expect(pathsOut.json_store_exists).toBe(false);
@@ -621,7 +625,7 @@ describe('knowledge cli', () => {
     expect(panel.exitCode).toBe(0);
     const panelOut = JSON.parse(new TextDecoder().decode(panel.stdout));
     expect(panelOut.schema).toBe('hasna.project_panel.v1');
-    expect(panelOut.metadata.home).toBe(expectedProjectKnowledgeHome(dir));
+    expect(normalizeDarwinPath(panelOut.metadata.home)).toBe(expectedProjectKnowledgeHome(dir));
     expect(panelOut.metadata.json_store_exists).toBe(false);
     expect(existsSync(join(dir, '.hasna', 'knowledge'))).toBe(false);
 
@@ -1142,7 +1146,7 @@ describe('knowledge cli', () => {
     expect(out.adapter.package).toBe('@hasna/machines');
     expect(typeof out.adapter.available).toBe('boolean');
     expect(out.knowledge.app_path).toBe(join('.hasna', 'knowledge'));
-    expect(out.knowledge.workspace_home).toBe(expectedProjectKnowledgeHome(dir));
+    expect(normalizeDarwinPath(out.knowledge.workspace_home)).toBe(expectedProjectKnowledgeHome(dir));
     expect(existsSync(join(dir, '.hasna', 'knowledge'))).toBe(false);
     expect(out.machines.length).toBeGreaterThanOrEqual(1);
     expect(out.machines.some((machine: any) => machine.local)).toBe(true);
