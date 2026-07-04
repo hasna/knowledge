@@ -14,6 +14,7 @@ import {
 import { dirname, join, relative } from 'node:path';
 import type { KnowledgeWorkspace } from './workspace';
 import { defaultKnowledgeConfig, workspaceForHome } from './workspace';
+import { saveStore, withLock, type KnowledgeItem, type Store } from './store';
 
 export interface WorkspaceTreeSummary {
   path: string;
@@ -52,6 +53,55 @@ export interface KnowledgeLegacyWorkspaceMigrationResult {
   checks: Record<string, boolean>;
   warnings: string[];
   message: string;
+}
+
+export interface KnowledgeLegacyWorkspaceMergeStats {
+  current_items: number;
+  legacy_items: number;
+  duplicate_ids_identical: number;
+  duplicate_ids_conflicting: number;
+  short_id_conflicts: number;
+  stranded_items: number;
+  merged_items: number;
+  expected_total_items: number;
+  final_items: number | null;
+}
+
+export interface KnowledgeLegacyWorkspaceMergeConflict {
+  type: 'id_conflict' | 'short_id_conflict';
+  id: string;
+  legacy_id?: string;
+  current_id?: string;
+  legacy_title?: string;
+  current_title?: string;
+}
+
+export interface KnowledgeLegacyWorkspaceMergeResult {
+  ok: boolean;
+  dry_run: boolean;
+  approval_required: boolean;
+  scope: string;
+  current_home: string;
+  legacy_home: string;
+  backup_home: string | null;
+  legacy_before: WorkspaceTreeSummary;
+  current_before: WorkspaceTreeSummary;
+  backup_after: WorkspaceTreeSummary | null;
+  current_after: WorkspaceTreeSummary | null;
+  merge: KnowledgeLegacyWorkspaceMergeStats;
+  conflicts: KnowledgeLegacyWorkspaceMergeConflict[];
+  checks: Record<string, boolean>;
+  warnings: string[];
+  message: string;
+}
+
+export interface KnowledgeLegacyWorkspaceMergeOptions {
+  scope: string;
+  current: KnowledgeWorkspace;
+  legacy: KnowledgeWorkspace;
+  approveWrite?: boolean;
+  approvedBy?: string;
+  now?: Date;
 }
 
 export interface KnowledgeLegacyWorkspaceMigrationOptions {
@@ -169,6 +219,294 @@ function summariesMatch(left: WorkspaceTreeSummary, right: WorkspaceTreeSummary)
 
 function migrationTimestamp(now: Date): string {
   return now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function itemSignature(item: KnowledgeItem): string {
+  return stableJson(item);
+}
+
+function itemShortId(item: KnowledgeItem): string | null {
+  return typeof item.short_id === 'string' && item.short_id.trim().length > 0 ? item.short_id : null;
+}
+
+function readMergeStore(path: string): Store {
+  if (!existsSync(path)) return { items: [] };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Store;
+  if (!parsed || !Array.isArray(parsed.items)) {
+    throw new Error(`Invalid knowledge JSON store shape at ${path}`);
+  }
+  return { items: parsed.items };
+}
+
+function mergeStats(
+  currentStore: Store,
+  legacyStore: Store,
+): {
+  stats: KnowledgeLegacyWorkspaceMergeStats;
+  conflicts: KnowledgeLegacyWorkspaceMergeConflict[];
+  mergedStore: Store;
+} {
+  const currentById = new Map(currentStore.items.map((item) => [item.id, item]));
+  const currentShortIds = new Map<string, KnowledgeItem>();
+  for (const item of currentStore.items) {
+    const shortId = itemShortId(item);
+    if (shortId) currentShortIds.set(shortId, item);
+  }
+
+  const conflicts: KnowledgeLegacyWorkspaceMergeConflict[] = [];
+  let duplicateIdsIdentical = 0;
+  let duplicateIdsConflicting = 0;
+  let shortIdConflicts = 0;
+  const stranded: KnowledgeItem[] = [];
+
+  for (const legacyItem of legacyStore.items) {
+    const currentItem = currentById.get(legacyItem.id);
+    if (currentItem) {
+      if (itemSignature(currentItem) === itemSignature(legacyItem)) {
+        duplicateIdsIdentical += 1;
+      } else {
+        duplicateIdsConflicting += 1;
+        conflicts.push({
+          type: 'id_conflict',
+          id: legacyItem.id,
+          legacy_title: legacyItem.title,
+          current_title: currentItem.title,
+        });
+      }
+      continue;
+    }
+
+    const shortId = itemShortId(legacyItem);
+    const currentShortIdItem = shortId ? currentShortIds.get(shortId) : null;
+    if (currentShortIdItem && currentShortIdItem.id !== legacyItem.id) {
+      shortIdConflicts += 1;
+      conflicts.push({
+        type: 'short_id_conflict',
+        id: shortId,
+        legacy_id: legacyItem.id,
+        current_id: currentShortIdItem.id,
+        legacy_title: legacyItem.title,
+        current_title: currentShortIdItem.title,
+      });
+      continue;
+    }
+
+    stranded.push(legacyItem);
+  }
+
+  const mergedStore = { items: [...currentStore.items, ...stranded] };
+  return {
+    stats: {
+      current_items: currentStore.items.length,
+      legacy_items: legacyStore.items.length,
+      duplicate_ids_identical: duplicateIdsIdentical,
+      duplicate_ids_conflicting: duplicateIdsConflicting,
+      short_id_conflicts: shortIdConflicts,
+      stranded_items: stranded.length,
+      merged_items: conflicts.length === 0 ? stranded.length : 0,
+      expected_total_items: currentStore.items.length + stranded.length,
+      final_items: null,
+    },
+    conflicts,
+    mergedStore,
+  };
+}
+
+function withStoreLocks<T>(paths: string[], fn: () => T): T {
+  const uniquePaths = [...new Set(paths)].sort();
+  const run = (index: number): T => {
+    if (index >= uniquePaths.length) return fn();
+    return withLock(uniquePaths[index]!, () => run(index + 1), { createParent: true });
+  };
+  return run(0);
+}
+
+export function mergeLegacyKnowledgeWorkspace(
+  options: KnowledgeLegacyWorkspaceMergeOptions,
+): KnowledgeLegacyWorkspaceMergeResult {
+  const now = options.now ?? new Date();
+  const dryRun = options.approveWrite !== true;
+  const legacyBefore = summarizeWorkspaceTree(options.legacy);
+  const currentBefore = summarizeWorkspaceTree(options.current);
+  const checks = {
+    legacy_exists: legacyBefore.exists,
+    legacy_store_exists: existsSync(options.legacy.jsonStorePath),
+    current_store_exists: existsSync(options.current.jsonStorePath),
+    approval_present: options.approveWrite === true && Boolean(options.approvedBy),
+    legacy_backup_written: false,
+    no_conflicts: false,
+    final_count_matches_expected: false,
+  };
+  const warnings: string[] = [];
+
+  if (!legacyBefore.exists || !checks.legacy_store_exists) {
+    return {
+      ok: true,
+      dry_run: dryRun,
+      approval_required: false,
+      scope: options.scope,
+      current_home: options.current.home,
+      legacy_home: options.legacy.home,
+      backup_home: null,
+      legacy_before: legacyBefore,
+      current_before: currentBefore,
+      backup_after: null,
+      current_after: currentBefore,
+      merge: {
+        current_items: readMergeStore(options.current.jsonStorePath).items.length,
+        legacy_items: 0,
+        duplicate_ids_identical: 0,
+        duplicate_ids_conflicting: 0,
+        short_id_conflicts: 0,
+        stranded_items: 0,
+        merged_items: 0,
+        expected_total_items: readMergeStore(options.current.jsonStorePath).items.length,
+        final_items: currentBefore.json_items,
+      },
+      conflicts: [],
+      checks: {
+        ...checks,
+        no_conflicts: true,
+        final_count_matches_expected: true,
+      },
+      warnings,
+      message: `No legacy knowledge JSON store found at ${options.legacy.jsonStorePath}`,
+    };
+  }
+
+  const currentStore = readMergeStore(options.current.jsonStorePath);
+  const legacyStore = readMergeStore(options.legacy.jsonStorePath);
+  const planned = mergeStats(currentStore, legacyStore);
+  checks.no_conflicts = planned.conflicts.length === 0;
+  if (planned.conflicts.length > 0) warnings.push('merge_conflicts_detected');
+  if (!checks.approval_present) warnings.push('write_approval_required');
+
+  if (dryRun || !checks.approval_present || planned.conflicts.length > 0) {
+    return {
+      ok: planned.conflicts.length === 0,
+      dry_run: true,
+      approval_required: !checks.approval_present,
+      scope: options.scope,
+      current_home: options.current.home,
+      legacy_home: options.legacy.home,
+      backup_home: `${options.legacy.home}.merge-backup-${migrationTimestamp(now)}`,
+      legacy_before: legacyBefore,
+      current_before: currentBefore,
+      backup_after: null,
+      current_after: null,
+      merge: planned.stats,
+      conflicts: planned.conflicts,
+      checks,
+      warnings,
+      message: planned.conflicts.length === 0
+        ? `Dry run: would merge ${planned.stats.stranded_items} legacy item(s) into ${options.current.jsonStorePath}`
+        : `Refusing legacy merge with ${planned.conflicts.length} conflict(s)`,
+    };
+  }
+
+  return withStoreLocks([options.current.jsonStorePath, options.legacy.jsonStorePath], () => {
+    const lockedCurrentStore = readMergeStore(options.current.jsonStorePath);
+    const lockedLegacyStore = readMergeStore(options.legacy.jsonStorePath);
+    const lockedPlan = mergeStats(lockedCurrentStore, lockedLegacyStore);
+    checks.no_conflicts = lockedPlan.conflicts.length === 0;
+    if (lockedPlan.conflicts.length > 0) {
+      return {
+        ok: false,
+        dry_run: true,
+        approval_required: false,
+        scope: options.scope,
+        current_home: options.current.home,
+        legacy_home: options.legacy.home,
+        backup_home: null,
+        legacy_before: summarizeWorkspaceTree(options.legacy),
+        current_before: summarizeWorkspaceTree(options.current),
+        backup_after: null,
+        current_after: null,
+        merge: lockedPlan.stats,
+        conflicts: lockedPlan.conflicts,
+        checks,
+        warnings: [...warnings, 'merge_conflicts_detected_after_lock'],
+        message: `Refusing legacy merge with ${lockedPlan.conflicts.length} conflict(s)`,
+      };
+    }
+
+    if (lockedPlan.stats.stranded_items === 0) {
+      lockedPlan.stats.final_items = lockedCurrentStore.items.length;
+      checks.final_count_matches_expected = lockedCurrentStore.items.length === lockedPlan.stats.expected_total_items;
+      return {
+        ok: checks.no_conflicts && checks.final_count_matches_expected,
+        dry_run: false,
+        approval_required: false,
+        scope: options.scope,
+        current_home: options.current.home,
+        legacy_home: options.legacy.home,
+        backup_home: null,
+        legacy_before: summarizeWorkspaceTree(options.legacy),
+        current_before: summarizeWorkspaceTree(options.current),
+        backup_after: null,
+        current_after: summarizeWorkspaceTree(options.current),
+        merge: lockedPlan.stats,
+        conflicts: [],
+        checks,
+        warnings,
+        message: `Legacy merge already up to date for ${options.current.jsonStorePath}`,
+      };
+    }
+
+    const backupHome = `${options.legacy.home}.merge-backup-${migrationTimestamp(now)}`;
+    mkdirSync(dirname(backupHome), { recursive: true });
+    cpSync(options.legacy.home, backupHome, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      preserveTimestamps: true,
+    });
+    const backupWorkspace = workspaceForHome(backupHome);
+    const backupAfter = summarizeWorkspaceTree(backupWorkspace);
+    checks.legacy_backup_written = summariesMatch(summarizeWorkspaceTree(options.legacy), backupAfter);
+    if (!checks.legacy_backup_written) {
+      throw new Error(`Legacy knowledge merge backup verification failed: ${backupHome}`);
+    }
+
+    saveStore(options.current.jsonStorePath, lockedPlan.mergedStore);
+    const finalStore = readMergeStore(options.current.jsonStorePath);
+    lockedPlan.stats.final_items = finalStore.items.length;
+    checks.final_count_matches_expected = finalStore.items.length === lockedPlan.stats.expected_total_items;
+    const currentAfter = summarizeWorkspaceTree(options.current);
+    const ok = checks.legacy_backup_written && checks.no_conflicts && checks.final_count_matches_expected;
+
+    return {
+      ok,
+      dry_run: false,
+      approval_required: false,
+      scope: options.scope,
+      current_home: options.current.home,
+      legacy_home: options.legacy.home,
+      backup_home: backupHome,
+      legacy_before: legacyBefore,
+      current_before: currentBefore,
+      backup_after: backupAfter,
+      current_after: currentAfter,
+      merge: lockedPlan.stats,
+      conflicts: [],
+      checks,
+      warnings,
+      message: ok
+        ? `Merged ${lockedPlan.stats.merged_items} legacy item(s) into ${options.current.jsonStorePath}`
+        : `Merged legacy knowledge store, but verification failed for ${options.current.jsonStorePath}`,
+    };
+  });
 }
 
 function sleepSync(milliseconds: number): void {

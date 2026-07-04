@@ -109,7 +109,9 @@ import {
   type KnowledgeWorkspace,
 } from './workspace';
 import {
+  mergeLegacyKnowledgeWorkspace,
   migrateLegacyKnowledgeWorkspace,
+  type KnowledgeLegacyWorkspaceMergeResult,
   type KnowledgeLegacyWorkspaceMigrationResult,
 } from './workspace-migration';
 
@@ -213,6 +215,7 @@ export interface KnowledgeSetupResult {
 }
 
 export type KnowledgeLegacyPathMigrationResult = KnowledgeLegacyWorkspaceMigrationResult;
+export type KnowledgeLegacyPathMergeResult = KnowledgeLegacyWorkspaceMergeResult;
 
 export interface KnowledgeSyncSnapshotOptions {
   includeTailscale?: boolean;
@@ -1609,6 +1612,23 @@ export class KnowledgeService {
     const current = this.workspace;
     const legacy = resolveLegacyScopedWorkspace(this.options.scope, this.options.cwd);
     const result = migrateLegacyKnowledgeWorkspace({
+      scope: this.scope,
+      current,
+      legacy,
+      approveWrite: options.approveWrite,
+      approvedBy: options.approvedBy,
+    });
+    if (!result.dry_run && result.ok) {
+      this.ensuredWorkspace = undefined;
+      this.cachedConfig = undefined;
+    }
+    return result;
+  }
+
+  mergeLegacyPath(options: { approveWrite?: boolean; approvedBy?: string } = {}): KnowledgeLegacyWorkspaceMergeResult {
+    const current = this.workspace;
+    const legacy = resolveLegacyScopedWorkspace(this.options.scope, this.options.cwd);
+    const result = mergeLegacyKnowledgeWorkspace({
       scope: this.scope,
       current,
       legacy,

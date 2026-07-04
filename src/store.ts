@@ -3,8 +3,19 @@
  * Copyright 2026 Hasna Inc.
  * Licensed under the Apache License, Version 2.0
  */
-import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { basename, dirname, join } from 'node:path';
 import { ensureParentDir, globalKnowledgeHome, legacyGlobalStorePath, workspaceForHome } from './workspace';
 
 export interface KnowledgeItem {
@@ -32,9 +43,9 @@ export function ensureStore(path: string): void {
   if (!existsSync(path)) {
     ensureParentDir(path);
     if (path === defaultStorePath() && existsSync(legacyGlobalStorePath())) {
-      writeFileSync(path, readFileSync(legacyGlobalStorePath(), 'utf8'));
+      writeFileAtomic(path, readFileSync(legacyGlobalStorePath(), 'utf8'));
     } else {
-      writeFileSync(path, JSON.stringify({ items: [] }, null, 2));
+      writeFileAtomic(path, `${JSON.stringify({ items: [] }, null, 2)}\n`);
     }
   }
 }
@@ -53,27 +64,137 @@ function lockPath(path: string): string {
   return `${path}.lock`;
 }
 
-function acquireLock(lockPath: string, ownerId: string): void {
-  const maxWait = 5000;
-  const interval = 50;
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    try {
-      if (!existsSync(lockPath)) {
-        writeFileSync(lockPath, JSON.stringify({ owner: ownerId, ts: Date.now() }));
-        return;
-      }
-      const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as { owner: string; ts: number };
-      if (Date.now() - lock.ts > 10000) {
-        unlinkSync(lockPath);
-      }
-    } catch {
-      // lock file disappeared, try again
+const LOCK_MAX_WAIT_MS = 10000;
+const LOCK_RETRY_MS = 25;
+const LOCK_STALE_MS = 120000;
+const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function errCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+function syncParentDir(path: string): void {
+  let fd: number | null = null;
+  try {
+    fd = openSync(dirname(path), 'r');
+    fsyncSync(fd);
+  } catch {
+    // Directory fsync is best-effort across platforms/filesystems.
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {}
     }
-    const start2 = Date.now();
-    while (Date.now() - start2 < interval) {}
   }
-  throw new Error(`Could not acquire lock on ${lockPath} after ${maxWait}ms`);
+}
+
+function writeFileAtomic(path: string, contents: string): void {
+  ensureParentDir(path);
+  const tmp = join(dirname(path), `.${basename(path)}.tmp.${randomUUID()}`);
+  let fd: number | null = null;
+  try {
+    fd = openSync(tmp, 'wx', 0o600);
+    writeFileSync(fd, contents);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tmp, path);
+    syncParentDir(path);
+  } catch (error) {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw error;
+  }
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(SLEEP_BUFFER, 0, 0, ms);
+}
+
+function processIsAlive(pid: unknown): boolean {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errCode(error) !== 'ESRCH';
+  }
+}
+
+function lockIsStale(path: string, now: number): boolean {
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const lock = JSON.parse(raw) as { pid?: unknown; ts?: unknown };
+    if (typeof lock.ts === 'number') {
+      return now - lock.ts > LOCK_STALE_MS && !processIsAlive(lock.pid);
+    }
+  } catch {}
+
+  try {
+    return now - lstatSync(path).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function moveStaleLock(path: string): void {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const stalePath = `${path}.stale.${stamp}.${randomUUID()}`;
+  try {
+    renameSync(path, stalePath);
+  } catch (error) {
+    if (errCode(error) !== 'ENOENT') throw error;
+    return;
+  }
+}
+
+function tryAcquireLock(path: string, ownerId: string): boolean {
+  let fd: number | null = null;
+  let created = false;
+  try {
+    fd = openSync(path, 'wx', 0o600);
+    created = true;
+    writeFileSync(fd, `${JSON.stringify({ owner: ownerId, pid: process.pid, ts: Date.now() })}\n`);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    syncParentDir(path);
+    return true;
+  } catch (error) {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+    if (created) {
+      try {
+        unlinkSync(path);
+      } catch {}
+    }
+    if (errCode(error) === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+function acquireLock(lockPath: string, ownerId: string): void {
+  const start = Date.now();
+  while (Date.now() - start < LOCK_MAX_WAIT_MS) {
+    if (tryAcquireLock(lockPath, ownerId)) return;
+    if (lockIsStale(lockPath, Date.now())) {
+      moveStaleLock(lockPath);
+    }
+    sleepSync(LOCK_RETRY_MS);
+  }
+  throw new Error(`Could not acquire lock on ${lockPath} after ${LOCK_MAX_WAIT_MS}ms`);
 }
 
 function releaseLock(lockPath: string, ownerId: string): void {
@@ -98,9 +219,7 @@ export function loadStore(path: string): Store {
 }
 
 export function saveStore(path: string, store: Store): void {
-  const tmp = `${path}.tmp.${randomUUID()}`;
-  writeFileSync(tmp, JSON.stringify(store, null, 2));
-  renameSync(tmp, path);
+  writeFileAtomic(path, `${JSON.stringify(store, null, 2)}\n`);
 }
 
 export function withLock<T>(path: string, fn: () => T, options: { createParent?: boolean } = {}): T {

@@ -17,7 +17,7 @@ import { type KnowledgeSyncConflict, type KnowledgeSyncConflictResolutionProposa
 import { type WikiCompileOptions } from './wiki-compiler';
 import { type StorageContract, type StorageValidationResult } from './storage-contract';
 import { type KnowledgeConfig, type KnowledgeWorkspace } from './workspace';
-import { type KnowledgeLegacyWorkspaceMigrationResult } from './workspace-migration';
+import { type KnowledgeLegacyWorkspaceMergeResult, type KnowledgeLegacyWorkspaceMigrationResult } from './workspace-migration';
 export interface KnowledgeServiceOptions {
     scope?: string;
     cwd?: string;
@@ -112,6 +112,7 @@ export interface KnowledgeSetupResult {
     message: string;
 }
 export type KnowledgeLegacyPathMigrationResult = KnowledgeLegacyWorkspaceMigrationResult;
+export type KnowledgeLegacyPathMergeResult = KnowledgeLegacyWorkspaceMergeResult;
 export interface KnowledgeSyncSnapshotOptions {
     includeTailscale?: boolean;
     machineId?: string;
@@ -369,6 +370,10 @@ export declare class KnowledgeService {
         approveWrite?: boolean;
         approvedBy?: string;
     }): KnowledgeLegacyPathMigrationResult;
+    mergeLegacyPath(options?: {
+        approveWrite?: boolean;
+        approvedBy?: string;
+    }): KnowledgeLegacyWorkspaceMergeResult;
     setup(options?: {
         mode?: string;
         apiUrl?: string;

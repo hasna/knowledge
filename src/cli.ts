@@ -275,7 +275,7 @@ Commands:
   setup                        Configure local, hosted, or canonical example S3 mode
   auth login|whoami|logout     Manage hosted API credentials
   remote contracts|status      Inspect hosted client contracts/readiness
-  storage status|validate|repair-artifact-keys|migrate-legacy-path
+  storage status|validate|repair-artifact-keys|migrate-legacy-path|merge-legacy-path
                                Inspect or repair local/S3 artifact storage metadata
   machines topology|preflight  Inspect optional machine topology/sync readiness
   sync status|doctor|snapshot|conflicts
@@ -404,7 +404,7 @@ function printCommandHelp(command: string): void {
   if (command === 'setup') { console.log('Usage: knowledge setup --mode local|hosted [--api-url https://...] [--canonical-example] [--scope local|global|project] [--json]'); return; }
   if (command === 'auth') { console.log('Usage: knowledge auth login|whoami|logout [--api-key <key>] [--email <email>] [--org <slug>] [--api-url https://...] [--scope local|global|project] [--json]'); return; }
   if (command === 'remote') { console.log('Usage: knowledge remote contracts|status [--scope local|global|project] [--json]'); return; }
-  if (command === 'storage') { console.log('Usage: knowledge storage status|validate|repair-artifact-keys|migrate-legacy-path [--approve-write --approved-by <name>] [--scope local|global|project] [--json]'); return; }
+  if (command === 'storage') { console.log('Usage: knowledge storage status|validate|repair-artifact-keys|migrate-legacy-path|merge-legacy-path [--approve-write --approved-by <name>] [--scope local|global|project] [--json]'); return; }
   if (command === 'machines') { console.log('Usage: knowledge machines topology [--no-tailscale] | preflight [machine] [--workspace <repo>] [--scope local|global|project] [--json]'); return; }
   if (command === 'sync') { console.log('Usage: knowledge sync status|doctor|readiness|snapshot|machines|conflicts [show|propose|resolve] [id] | dry-run|pull|push|sync|export|import [--peer-workspace <path>] [--machine <ssh-alias>] [--tables <names>] [--dry-run] [--limit <n>] [--approve-write] [--approved-by <name>] [--strategy <name>] [--mode deterministic|ai] [--model <alias|provider:model>] [--fake] [--no-tailscale] [--scope local|global|project] [--json]\n\nRemote machine sync resolves peer paths through @hasna/machines when --peer-workspace is omitted.'); return; }
   if (command === 'db') { console.log('Usage: knowledge db init|stats|storage status|push|pull|sync [--tables sources,chunks] [--scope local|global|project] [--json]'); return; }
@@ -554,6 +554,15 @@ async function run(argv: string[]): Promise<void> {
       });
       output(migration, flags.json);
       if (!migration.ok && !flags.json) process.exitCode = 1;
+      return;
+    }
+    if (storageAction === 'merge-legacy-path' || storageAction === 'merge-legacy' || storageAction === 'merge-path') {
+      const merge = service.mergeLegacyPath({
+        approveWrite: flags.approveWrite,
+        approvedBy: flags.approvedBy,
+      });
+      output(merge, flags.json);
+      if (!merge.ok && !flags.json) process.exitCode = 1;
       return;
     }
   }
@@ -717,7 +726,16 @@ async function run(argv: string[]): Promise<void> {
       if (!migration.ok && !flags.json) process.exitCode = 1;
       return;
     }
-    throw new Error("Invalid storage action. Use 'status', 'validate', 'repair-artifact-keys', or 'migrate-legacy-path'.");
+    if (action === 'merge-legacy-path' || action === 'merge-legacy' || action === 'merge-path') {
+      const merge = service.mergeLegacyPath({
+        approveWrite: flags.approveWrite,
+        approvedBy: flags.approvedBy,
+      });
+      output(merge, flags.json);
+      if (!merge.ok && !flags.json) process.exitCode = 1;
+      return;
+    }
+    throw new Error("Invalid storage action. Use 'status', 'validate', 'repair-artifact-keys', 'migrate-legacy-path', or 'merge-legacy-path'.");
   }
 
   if (command === 'machines') {

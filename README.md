@@ -350,6 +350,7 @@ knowledge storage status [--scope project] [--json]
 knowledge storage validate [--scope project] [--json]
 knowledge storage repair-artifact-keys [--approve-write --approved-by <name>] [--scope project] [--json]
 knowledge storage migrate-legacy-path [--approve-write --approved-by <name>] [--scope project] [--json]
+knowledge storage merge-legacy-path [--approve-write --approved-by <name>] [--scope project] [--json]
 ```
 Show the storage contract for local or S3-backed generated artifacts. Local mode
 uses `.hasna/knowledge` for config, SQLite, indexes, wiki artifacts, logs,
@@ -377,6 +378,13 @@ integrity, artifact counts and hashes, and only moves data after
 `--approve-write --approved-by <name>`. The write path creates a backup,
 renames the workspace into `.hasna/knowledge`, verifies the backup and moved
 tree match, and leaves only a diagnostic tombstone at the old location.
+
+`storage merge-legacy-path` is the explicit recovery path when the canonical
+`.hasna/knowledge` workspace already contains data. It dry-runs by default,
+reports current, legacy, duplicate, stranded, conflict, expected, and final item
+counts, refuses conflicting duplicate IDs or `short_id` collisions, snapshots
+the legacy workspace first, and then appends non-conflicting legacy JSON items
+to the canonical JSON store after `--approve-write --approved-by <name>`.
 
 For example production, the canonical generated-artifact bucket is
 `example-knowledge-prod` in `us-east-1` with prefix
@@ -770,7 +778,11 @@ item-store location with `--store <path>`.
 Older app-folder workspaces are not read as an operational fallback. Use
 `knowledge storage migrate-legacy-path --approve-write --approved-by <name>` to
 move one into the canonical `.hasna/knowledge/` location with backup and
-verification evidence.
+verification evidence when the canonical path is empty/default. If canonical
+already contains data, use
+`knowledge storage merge-legacy-path --approve-write --approved-by <name>` to
+snapshot the legacy workspace and merge non-conflicting legacy items into the
+canonical store.
 
 ## MCP Server
 

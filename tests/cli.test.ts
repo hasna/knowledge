@@ -833,6 +833,173 @@ describe('knowledge cli', () => {
     expect(existsSync(join(legacyHome, 'TOMBSTONE.md'))).toBe(false);
   });
 
+  test('storage merge safely imports legacy app-folder items into populated canonical store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok-workspace-merge-'));
+    const legacyHome = join(dir, '.hasna', 'apps', 'knowledge');
+    const currentHome = join(dir, '.hasna', 'knowledge');
+    mkdirSync(legacyHome, { recursive: true });
+    mkdirSync(currentHome, { recursive: true });
+    writeFileSync(join(legacyHome, 'db.json'), JSON.stringify({
+      items: [
+        {
+          id: 'k_duplicate',
+          title: 'Duplicate item',
+          content: 'same payload',
+          url: null,
+          tags: ['shared'],
+          metadata: { source: 'legacy' },
+          archived: false,
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'k_stranded',
+          short_id: 'stranded',
+          title: 'Stranded item',
+          content: 'preserve this exact object',
+          url: 'https://example.com/stranded',
+          tags: ['legacy'],
+          metadata: { source: 'legacy', nested: { value: true } },
+          archived: true,
+          created_at: '2026-06-27T00:00:00.000Z',
+          updated_at: '2026-06-27T00:01:00.000Z',
+        },
+      ],
+    }, null, 2));
+    writeFileSync(join(currentHome, 'db.json'), JSON.stringify({
+      items: [
+        {
+          id: 'k_current',
+          title: 'Current item',
+          content: 'current payload',
+          url: null,
+          tags: [],
+          created_at: '2026-06-29T00:00:00.000Z',
+          updated_at: '2026-06-29T00:00:00.000Z',
+        },
+        {
+          id: 'k_duplicate',
+          title: 'Duplicate item',
+          content: 'same payload',
+          url: null,
+          tags: ['shared'],
+          metadata: { source: 'legacy' },
+          archived: false,
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    }, null, 2));
+
+    const preview = runCli(['storage', 'merge-legacy-path', '--scope', 'project', '--json'], dir);
+    expect(preview.exitCode).toBe(0);
+    const previewOut = JSON.parse(new TextDecoder().decode(preview.stdout));
+    expect(previewOut.dry_run).toBe(true);
+    expect(previewOut.approval_required).toBe(true);
+    expect(previewOut.merge).toMatchObject({
+      current_items: 2,
+      legacy_items: 2,
+      duplicate_ids_identical: 1,
+      stranded_items: 1,
+      expected_total_items: 3,
+    });
+    expect(previewOut.conflicts).toEqual([]);
+
+    const applied = runCli([
+      'storage',
+      'merge-legacy-path',
+      '--scope',
+      'project',
+      '--approve-write',
+      '--approved-by',
+      'cli-test',
+      '--json',
+    ], dir);
+    expect(applied.exitCode).toBe(0);
+    const appliedOut = JSON.parse(new TextDecoder().decode(applied.stdout));
+    expect(appliedOut.ok).toBe(true);
+    expect(appliedOut.dry_run).toBe(false);
+    expect(appliedOut.merge).toMatchObject({
+      merged_items: 1,
+      expected_total_items: 3,
+      final_items: 3,
+    });
+    expect(appliedOut.checks).toMatchObject({
+      legacy_backup_written: true,
+      no_conflicts: true,
+      final_count_matches_expected: true,
+    });
+    expect(existsSync(join(appliedOut.backup_home, 'db.json'))).toBe(true);
+
+    const merged = JSON.parse(readFileSync(join(currentHome, 'db.json'), 'utf8')) as {
+      items: Array<{ id: string; archived?: boolean; metadata?: Record<string, unknown> }>;
+    };
+    expect(merged.items.map((item) => item.id).sort()).toEqual(['k_current', 'k_duplicate', 'k_stranded']);
+    expect(merged.items.find((item) => item.id === 'k_stranded')).toMatchObject({
+      archived: true,
+      metadata: { source: 'legacy', nested: { value: true } },
+    });
+
+    const rerun = runCli([
+      'storage',
+      'merge-legacy-path',
+      '--scope',
+      'project',
+      '--approve-write',
+      '--approved-by',
+      'cli-test',
+      '--json',
+    ], dir);
+    expect(rerun.exitCode).toBe(0);
+    const rerunOut = JSON.parse(new TextDecoder().decode(rerun.stdout));
+    expect(rerunOut.merge).toMatchObject({
+      stranded_items: 0,
+      merged_items: 0,
+      final_items: 3,
+    });
+  });
+
+  test('storage merge refuses conflicting duplicate IDs', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok-workspace-merge-conflict-'));
+    const legacyHome = join(dir, '.hasna', 'apps', 'knowledge');
+    const currentHome = join(dir, '.hasna', 'knowledge');
+    mkdirSync(legacyHome, { recursive: true });
+    mkdirSync(currentHome, { recursive: true });
+    const baseItem = {
+      id: 'k_conflict',
+      title: 'Conflict item',
+      url: null,
+      tags: [],
+      created_at: '2026-06-28T00:00:00.000Z',
+      updated_at: '2026-06-28T00:00:00.000Z',
+    };
+    writeFileSync(join(legacyHome, 'db.json'), JSON.stringify({
+      items: [{ ...baseItem, content: 'legacy content' }],
+    }, null, 2));
+    writeFileSync(join(currentHome, 'db.json'), JSON.stringify({
+      items: [{ ...baseItem, content: 'current content' }],
+    }, null, 2));
+
+    const result = runCli([
+      'storage',
+      'merge-legacy-path',
+      '--scope',
+      'project',
+      '--approve-write',
+      '--approved-by',
+      'cli-test',
+      '--json',
+    ], dir);
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(new TextDecoder().decode(result.stdout));
+    expect(out.ok).toBe(false);
+    expect(out.dry_run).toBe(true);
+    expect(out.merge.duplicate_ids_conflicting).toBe(1);
+    expect(out.conflicts).toEqual([expect.objectContaining({ type: 'id_conflict', id: 'k_conflict' })]);
+    expect(existsSync(join(currentHome, 'db.json'))).toBe(true);
+    expect(existsSync(join(legacyHome, 'db.json'))).toBe(true);
+  });
+
   test('machines topology command exposes adapter-aware topology shape', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ok-machines-cli-'));
     const home = mkdtempSync(join(tmpdir(), 'ok-machines-cli-home-'));
