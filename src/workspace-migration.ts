@@ -169,11 +169,15 @@ function sqliteSummary(path: string): WorkspaceTreeSummary['sqlite'] {
   }
 }
 
-export function summarizeWorkspaceTree(workspace: KnowledgeWorkspace): WorkspaceTreeSummary {
+export function summarizeWorkspaceTree(
+  workspace: KnowledgeWorkspace,
+  options: { includeSqlite?: boolean } = {},
+): WorkspaceTreeSummary {
   const files = walkFiles(workspace.home);
   const treeHash = hashFiles(workspace.home, files);
   const artifactFiles = walkFiles(workspace.artifactsDir);
   const artifactHash = hashFiles(workspace.artifactsDir, artifactFiles);
+  const sqliteExists = existsSync(workspace.knowledgeDbPath);
   return {
     path: workspace.home,
     exists: existsSync(workspace.home),
@@ -181,7 +185,9 @@ export function summarizeWorkspaceTree(workspace: KnowledgeWorkspace): Workspace
     total_bytes: treeHash.bytes,
     tree_sha256: treeHash.sha256,
     json_items: jsonItemCount(workspace.jsonStorePath),
-    sqlite: sqliteSummary(workspace.knowledgeDbPath),
+    sqlite: options.includeSqlite === false
+      ? { exists: sqliteExists, integrity_check: null, table_counts: {} }
+      : sqliteSummary(workspace.knowledgeDbPath),
     artifacts: {
       exists: existsSync(workspace.artifactsDir),
       file_count: artifactFiles.length,
@@ -631,9 +637,12 @@ export function migrateLegacyKnowledgeWorkspace(
 ): KnowledgeLegacyWorkspaceMigrationResult {
   const now = options.now ?? new Date();
   const dryRun = options.approveWrite !== true;
-  const legacyBefore = summarizeWorkspaceTree(options.legacy);
   const currentBefore = summarizeWorkspaceTree(options.current);
   const currentIsDefaultScaffold = isDefaultScaffold(options.current, currentBefore);
+  const willMutateLegacy = options.approveWrite === true
+    && Boolean(options.approvedBy)
+    && (!currentBefore.exists || currentIsDefaultScaffold);
+  const legacyBefore = summarizeWorkspaceTree(options.legacy, { includeSqlite: !willMutateLegacy });
   const checks = {
     legacy_exists: legacyBefore.exists,
     current_absent_or_default_scaffold: !currentBefore.exists || currentIsDefaultScaffold,
@@ -728,8 +737,8 @@ export function migrateLegacyKnowledgeWorkspace(
     preserveTimestamps: true,
   });
   const backupWorkspace = workspaceForHome(backupHome);
-  const backupAfter = summarizeWorkspaceTree(backupWorkspace);
-  checks.backup_matches_legacy = summariesMatch(legacyBefore, backupAfter);
+  const backupSnapshot = summarizeWorkspaceTree(backupWorkspace, { includeSqlite: false });
+  checks.backup_matches_legacy = summariesMatch(legacyBefore, backupSnapshot);
   if (!checks.backup_matches_legacy) {
     throw new Error(`Legacy knowledge backup verification failed: ${backupHome}`);
   }
@@ -738,8 +747,11 @@ export function migrateLegacyKnowledgeWorkspace(
     rmSync(options.current.home, { recursive: true, force: true });
   }
   moveWorkspace(options.legacy.home, options.current.home);
+  const currentSnapshot = summarizeWorkspaceTree(options.current, { includeSqlite: false });
+  checks.migrated_matches_backup = summariesMatch(backupSnapshot, currentSnapshot);
+  const backupAfter = summarizeWorkspaceTree(backupWorkspace);
   const currentAfter = summarizeWorkspaceTree(options.current);
-  checks.migrated_matches_backup = summariesMatch(backupAfter, currentAfter);
+  const legacyBeforeOutput = { ...backupAfter, path: options.legacy.home };
 
   mkdirSync(options.legacy.home, { recursive: true });
   const tombstonePath = join(options.legacy.home, 'TOMBSTONE.md');
@@ -759,7 +771,7 @@ export function migrateLegacyKnowledgeWorkspace(
     approved_by: options.approvedBy,
     new_path: options.current.home,
     backup_path: backupHome,
-    legacy_before: legacyBefore,
+    legacy_before: legacyBeforeOutput,
     backup_after: backupAfter,
     current_after: currentAfter,
   }, null, 2)}\n`);
@@ -775,7 +787,7 @@ export function migrateLegacyKnowledgeWorkspace(
     legacy_home: options.legacy.home,
     backup_home: backupHome,
     tombstone_path: tombstonePath,
-    legacy_before: legacyBefore,
+    legacy_before: legacyBeforeOutput,
     current_before: currentBefore,
     backup_after: backupAfter,
     current_after: currentAfter,

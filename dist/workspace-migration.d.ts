@@ -89,6 +89,8 @@ export interface KnowledgeLegacyWorkspaceMigrationOptions {
     approvedBy?: string;
     now?: Date;
 }
-export declare function summarizeWorkspaceTree(workspace: KnowledgeWorkspace): WorkspaceTreeSummary;
+export declare function summarizeWorkspaceTree(workspace: KnowledgeWorkspace, options?: {
+    includeSqlite?: boolean;
+}): WorkspaceTreeSummary;
 export declare function mergeLegacyKnowledgeWorkspace(options: KnowledgeLegacyWorkspaceMergeOptions): KnowledgeLegacyWorkspaceMergeResult;
 export declare function migrateLegacyKnowledgeWorkspace(options: KnowledgeLegacyWorkspaceMigrationOptions): KnowledgeLegacyWorkspaceMigrationResult;
