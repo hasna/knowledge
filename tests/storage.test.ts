@@ -150,6 +150,7 @@ describe('knowledge database storage sync config', () => {
       activeEnv: null,
       sync: [],
     });
+    expect(status.databasePath).toBe(join(expectedProjectKnowledgeHome(dir), 'knowledge.db'));
     expect(existsSync(status.databasePath)).toBe(true);
     expect(realpathSync(status.databasePath)).toBe(realpathSync(join(dir, '.hasna', 'knowledge', 'knowledge.db')));
     expect(status.tables).toEqual(STORAGE_TABLES);

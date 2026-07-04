@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -40,12 +40,12 @@ describe('app wiki standard', () => {
       process.env.USERPROFILE = home;
 
       const wiki = openProjectWiki({ cwd: projectDir });
-      expect(wiki.paths().home).toBe(join(projectDir, '.hasna', 'knowledge'));
+      expect(wiki.paths().home).toBe(join(realpathSync(projectDir), '.hasna', 'knowledge'));
       expect(existsSync(join(projectDir, '.hasna', 'knowledge'))).toBe(false);
 
       const init = await wiki.init();
       expect(init.scope).toBe('project');
-      expect(init.knowledge_db_path).toBe(join(projectDir, '.hasna', 'knowledge', 'knowledge.db'));
+      expect(init.knowledge_db_path).toBe(join(realpathSync(projectDir), '.hasna', 'knowledge', 'knowledge.db'));
 
       const sourcePath = join(projectDir, 'source.md');
       writeFileSync(sourcePath, 'The scoped app wiki standard keeps project notes in the project catalog.');
