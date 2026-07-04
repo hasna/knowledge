@@ -157,6 +157,26 @@ function moveStaleLock(path: string): void {
   }
 }
 
+function breakStaleLock(lockPath: string): void {
+  const owner = randomUUID();
+  const breakerPath = `${lockPath}.breaker`;
+  const start = Date.now();
+  while (Date.now() - start < LOCK_MAX_WAIT_MS) {
+    if (tryAcquireLock(breakerPath, owner)) {
+      try {
+        if (lockIsStale(lockPath, Date.now())) {
+          moveStaleLock(lockPath);
+        }
+      } finally {
+        releaseLock(breakerPath, owner);
+      }
+      return;
+    }
+    sleepSync(LOCK_RETRY_MS);
+  }
+  throw new Error(`Could not acquire stale-lock breaker on ${breakerPath} after ${LOCK_MAX_WAIT_MS}ms`);
+}
+
 function tryAcquireLock(path: string, ownerId: string): boolean {
   let fd: number | null = null;
   let created = false;
@@ -190,7 +210,7 @@ function acquireLock(lockPath: string, ownerId: string): void {
   while (Date.now() - start < LOCK_MAX_WAIT_MS) {
     if (tryAcquireLock(lockPath, ownerId)) return;
     if (lockIsStale(lockPath, Date.now())) {
-      moveStaleLock(lockPath);
+      breakStaleLock(lockPath);
     }
     sleepSync(LOCK_RETRY_MS);
   }

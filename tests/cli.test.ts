@@ -1000,6 +1000,132 @@ describe('knowledge cli', () => {
     expect(existsSync(join(legacyHome, 'db.json'))).toBe(true);
   });
 
+  test('storage merge refuses id and short_id namespace collisions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok-workspace-merge-namespace-conflict-'));
+    const legacyHome = join(dir, '.hasna', 'apps', 'knowledge');
+    const currentHome = join(dir, '.hasna', 'knowledge');
+    mkdirSync(legacyHome, { recursive: true });
+    mkdirSync(currentHome, { recursive: true });
+    writeFileSync(join(currentHome, 'db.json'), JSON.stringify({
+      items: [
+        {
+          id: 'k_current_short_owner',
+          short_id: 'legacy_id_hits_current_short',
+          title: 'Current short owner',
+          content: 'current',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'current_id_hits_legacy_short',
+          title: 'Current id owner',
+          content: 'current',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    }, null, 2));
+    writeFileSync(join(legacyHome, 'db.json'), JSON.stringify({
+      items: [
+        {
+          id: 'legacy_id_hits_current_short',
+          title: 'Legacy id collision',
+          content: 'legacy',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'k_legacy_short_owner',
+          short_id: 'current_id_hits_legacy_short',
+          title: 'Legacy short collision',
+          content: 'legacy',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    }, null, 2));
+
+    const result = runCli(['storage', 'merge-legacy-path', '--scope', 'project', '--json'], dir);
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(new TextDecoder().decode(result.stdout));
+    expect(out.ok).toBe(false);
+    expect(out.merge.short_id_conflicts).toBe(2);
+    expect(out.conflicts).toEqual([
+      expect.objectContaining({ type: 'short_id_conflict', id: 'legacy_id_hits_current_short' }),
+      expect.objectContaining({ type: 'short_id_conflict', id: 'current_id_hits_legacy_short' }),
+    ]);
+  });
+
+  test('storage merge refuses duplicate lookup keys inside legacy store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok-workspace-merge-legacy-duplicates-'));
+    const legacyHome = join(dir, '.hasna', 'apps', 'knowledge');
+    const currentHome = join(dir, '.hasna', 'knowledge');
+    mkdirSync(legacyHome, { recursive: true });
+    mkdirSync(currentHome, { recursive: true });
+    writeFileSync(join(currentHome, 'db.json'), JSON.stringify({ items: [] }, null, 2));
+    writeFileSync(join(legacyHome, 'db.json'), JSON.stringify({
+      items: [
+        {
+          id: 'k_duplicate_legacy',
+          title: 'Legacy first duplicate id',
+          content: 'legacy',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'k_duplicate_legacy',
+          title: 'Legacy second duplicate id',
+          content: 'legacy changed',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'k_legacy_short_a',
+          short_id: 'shared_short',
+          title: 'Legacy first duplicate short',
+          content: 'legacy',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'k_legacy_short_b',
+          short_id: 'shared_short',
+          title: 'Legacy second duplicate short',
+          content: 'legacy',
+          url: null,
+          tags: [],
+          created_at: '2026-06-28T00:00:00.000Z',
+          updated_at: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    }, null, 2));
+
+    const result = runCli(['storage', 'merge-legacy-path', '--scope', 'project', '--json'], dir);
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(new TextDecoder().decode(result.stdout));
+    expect(out.ok).toBe(false);
+    expect(out.merge.duplicate_ids_conflicting).toBe(1);
+    expect(out.merge.short_id_conflicts).toBe(1);
+    expect(out.conflicts).toEqual([
+      expect.objectContaining({ type: 'id_conflict', id: 'k_duplicate_legacy' }),
+      expect.objectContaining({ type: 'short_id_conflict', id: 'shared_short' }),
+    ]);
+  });
+
   test('machines topology command exposes adapter-aware topology shape', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ok-machines-cli-'));
     const home = mkdtempSync(join(tmpdir(), 'ok-machines-cli-home-'));

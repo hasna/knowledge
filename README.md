@@ -384,7 +384,10 @@ tree match, and leaves only a diagnostic tombstone at the old location.
 reports current, legacy, duplicate, stranded, conflict, expected, and final item
 counts, refuses conflicting duplicate IDs or `short_id` collisions, snapshots
 the legacy workspace first, and then appends non-conflicting legacy JSON items
-to the canonical JSON store after `--approve-write --approved-by <name>`.
+to the canonical JSON store after `--approve-write --approved-by <name>`. The
+merge command locks both JSON stores; stop other knowledge writers first when
+you need the whole legacy workspace snapshot to be coherent across SQLite,
+artifact, run, and wiki files too.
 
 For example production, the canonical generated-artifact bucket is
 `example-knowledge-prod` in `us-east-1` with prefix

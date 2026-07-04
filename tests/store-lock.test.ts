@@ -84,4 +84,43 @@ describe('JSON store lock handling', () => {
     expect(new Set(parsed.items.map((item) => item.title)).size).toBe(writerCount);
     expect(existsSync(`${storePath}.lock`)).toBe(false);
   });
+
+  test('serializes multiple writers racing to reclaim one stale lock', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'knowledge-concurrent-stale-lock-'));
+    const storePath = join(dir, 'db.json');
+    const lockPath = `${storePath}.lock`;
+    writeFileSync(storePath, `${JSON.stringify({ items: [] }, null, 2)}\n`);
+    writeFileSync(lockPath, '{stale');
+    const staleTime = new Date(Date.now() - 180000);
+    utimesSync(lockPath, staleTime, staleTime);
+
+    const writerCount = 16;
+    const children = Array.from({ length: writerCount }, (_, index) => spawn('bun', [
+      CLI,
+      'add',
+      `Stale concurrent ${index}`,
+      `Content ${index}`,
+      '--store',
+      storePath,
+      '--json',
+    ], {
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+        NO_COLOR: '1',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+
+    const results = await Promise.all(children.map(waitForProcess));
+    expect(results.filter((result) => result.code !== 0)).toEqual([]);
+
+    const parsed = JSON.parse(readFileSync(storePath, 'utf8')) as {
+      items: Array<{ title: string }>;
+    };
+    expect(parsed.items).toHaveLength(writerCount);
+    expect(new Set(parsed.items.map((item) => item.title)).size).toBe(writerCount);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(`${lockPath}.breaker`)).toBe(false);
+  });
 });

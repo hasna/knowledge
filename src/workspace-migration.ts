@@ -258,10 +258,17 @@ function mergeStats(
   mergedStore: Store;
 } {
   const currentById = new Map(currentStore.items.map((item) => [item.id, item]));
-  const currentShortIds = new Map<string, KnowledgeItem>();
+  const reservedKeys = new Map<string, { item: KnowledgeItem; keyKind: 'id' | 'short_id'; source: 'current' | 'legacy' }>();
   for (const item of currentStore.items) {
+    const existingId = reservedKeys.get(item.id);
+    if (existingId && existingId.item.id !== item.id) {
+      // Existing canonical ambiguity is reported below when legacy collides with it.
+    }
+    reservedKeys.set(item.id, { item, keyKind: 'id', source: 'current' });
     const shortId = itemShortId(item);
-    if (shortId) currentShortIds.set(shortId, item);
+    if (shortId && !reservedKeys.has(shortId)) {
+      reservedKeys.set(shortId, { item, keyKind: 'short_id', source: 'current' });
+    }
   }
 
   const conflicts: KnowledgeLegacyWorkspaceMergeConflict[] = [];
@@ -287,22 +294,45 @@ function mergeStats(
       continue;
     }
 
-    const shortId = itemShortId(legacyItem);
-    const currentShortIdItem = shortId ? currentShortIds.get(shortId) : null;
-    if (currentShortIdItem && currentShortIdItem.id !== legacyItem.id) {
-      shortIdConflicts += 1;
-      conflicts.push({
-        type: 'short_id_conflict',
-        id: shortId,
-        legacy_id: legacyItem.id,
-        current_id: currentShortIdItem.id,
-        legacy_title: legacyItem.title,
-        current_title: currentShortIdItem.title,
-      });
+    const keys = [
+      { key: legacyItem.id, keyKind: 'id' as const },
+      ...(itemShortId(legacyItem) ? [{ key: itemShortId(legacyItem)!, keyKind: 'short_id' as const }] : []),
+    ];
+    let itemHasConflict = false;
+    for (const { key, keyKind } of keys) {
+      const existing = reservedKeys.get(key);
+      if (!existing) continue;
+      if (keyKind === 'id' && existing.keyKind === 'id') {
+        duplicateIdsConflicting += 1;
+        conflicts.push({
+          type: 'id_conflict',
+          id: key,
+          legacy_id: legacyItem.id,
+          current_id: existing.item.id,
+          legacy_title: legacyItem.title,
+          current_title: existing.item.title,
+        });
+      } else {
+        shortIdConflicts += 1;
+        conflicts.push({
+          type: 'short_id_conflict',
+          id: key,
+          legacy_id: legacyItem.id,
+          current_id: existing.item.id,
+          legacy_title: legacyItem.title,
+          current_title: existing.item.title,
+        });
+      }
+      itemHasConflict = true;
+    }
+    if (itemHasConflict) {
       continue;
     }
 
     stranded.push(legacyItem);
+    for (const { key, keyKind } of keys) {
+      reservedKeys.set(key, { item: legacyItem, keyKind, source: 'legacy' });
+    }
   }
 
   const mergedStore = { items: [...currentStore.items, ...stranded] };
