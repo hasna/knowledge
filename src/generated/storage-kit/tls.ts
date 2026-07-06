@@ -12,7 +12,7 @@
 //
 // The rule here follows libpq `sslmode` semantics exactly:
 //   - disable / (no ssl param)  -> no TLS (ssl: undefined)
-//   - prefer / require          -> encrypt, do NOT verify the server cert
+//   - allow / prefer / require  -> encrypt, do NOT verify the server cert
 //                                  (rejectUnauthorized: false) — this matches
 //                                  what libpq `require` means and is the AWS
 //                                  RDS default when no CA bundle is supplied.
@@ -95,19 +95,16 @@ export function resolveTlsConfig(
 ): PgSslConfig | undefined {
   const mode = sslModeFromConnectionString(connectionString);
 
-  if (mode === "disable" || mode === "prefer") {
-    // `prefer` still lets pg negotiate TLS opportunistically without a config,
-    // but we only force TLS at `require` and above. Treat both as no explicit
-    // ssl config so a plain local Postgres keeps working.
+  if (mode === "disable") {
     return undefined;
   }
 
   const ca = loadCaBundle(options);
 
-  if (mode === "require") {
+  if (mode === "prefer" || mode === "require") {
     // Encrypt but do not verify — libpq `require` semantics. If a CA bundle is
     // available we still pin it (strictly better) while keeping verification
-    // relaxed so a rotated/regional RDS cert cannot hard-fail a `require` DSN.
+    // relaxed so a rotated/regional RDS cert cannot hard-fail a non-verifying DSN.
     return ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
   }
 

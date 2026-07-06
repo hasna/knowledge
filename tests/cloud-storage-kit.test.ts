@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   KIT_VERSION,
   createKnowledgeCloudClient,
+  defineMigration,
   normalizeCloudStorageMode,
+  MigrationLedger,
+  resolveTlsConfig,
   resolveStorageMode,
   storageEnvKeys,
   wrapExecutor,
+  type TypedQueryClient,
   type PgExecutor,
 } from '../src/storage';
 
@@ -17,6 +21,44 @@ class FakeExecutor implements PgExecutor {
   constructor(private readonly rows: Record<string, unknown>[]) {}
   async query<T>(_sql: string, _params?: readonly unknown[]): Promise<{ rows: T[]; rowCount: number | null }> {
     return { rows: this.rows as unknown as T[], rowCount: this.rows.length };
+  }
+}
+
+class FakeMigrationClient implements TypedQueryClient {
+  readonly executed: string[] = [];
+  transactionCount = 0;
+
+  async query<T>(): Promise<{ rows: T[]; rowCount: number }> {
+    return { rows: [], rowCount: 0 };
+  }
+
+  async many<T>(): Promise<T[]> {
+    return [];
+  }
+
+  async get<T>(): Promise<T | null> {
+    return null;
+  }
+
+  async one<T>(): Promise<T> {
+    throw new Error('No rows');
+  }
+
+  async execute(sql: string): Promise<void> {
+    this.executed.push(sql);
+  }
+
+  async transaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T> {
+    this.transactionCount += 1;
+    this.executed.push('BEGIN');
+    try {
+      const result = await fn(this);
+      this.executed.push('COMMIT');
+      return result;
+    } catch (error) {
+      this.executed.push('ROLLBACK');
+      throw error;
+    }
   }
 }
 
@@ -52,6 +94,42 @@ describe('vendored cloud storage kit surface', () => {
         HASNA_KNOWLEDGE_DATABASE_URL: 'postgres://x/y',
       }).mode,
     ).toBe('cloud');
+  });
+
+  test('maps sslmode prefer and allow to encrypted pg connections', () => {
+    const env = {};
+    expect(resolveTlsConfig('postgres://user:pass@example.test/db', { env })).toBeUndefined();
+    expect(resolveTlsConfig('postgres://user:pass@example.test/db?sslmode=disable', { env })).toBeUndefined();
+    expect(resolveTlsConfig('postgres://user:pass@example.test/db?sslmode=prefer', { env })).toEqual({
+      rejectUnauthorized: false,
+    });
+    expect(resolveTlsConfig('postgres://user:pass@example.test/db?sslmode=allow', { env })).toEqual({
+      rejectUnauthorized: false,
+    });
+    expect(resolveTlsConfig('postgres://user:pass@example.test/db?sslmode=require', { env })).toEqual({
+      rejectUnauthorized: false,
+    });
+    expect(() => resolveTlsConfig('postgres://user:pass@example.test/db?sslmode=verify-full', { env })).toThrow(
+      'requires a CA bundle',
+    );
+  });
+
+  test('applies migration SQL and ledger writes in one transaction', async () => {
+    const client = new FakeMigrationClient();
+    const ledger = new MigrationLedger(client, [
+      defineMigration('001_init', 'CREATE TABLE example (id TEXT PRIMARY KEY)'),
+    ]);
+
+    await ledger.migrate();
+
+    expect(client.transactionCount).toBe(1);
+    expect(client.executed).toEqual([
+      expect.stringContaining('CREATE TABLE IF NOT EXISTS schema_migrations'),
+      'BEGIN',
+      'CREATE TABLE example (id TEXT PRIMARY KEY)',
+      expect.stringContaining('INSERT INTO schema_migrations'),
+      'COMMIT',
+    ]);
   });
 
   test('normalizes deprecated aliases to cloud', () => {

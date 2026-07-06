@@ -2,5 +2,5 @@ export { KNOWLEDGE_STORAGE_ENV, KNOWLEDGE_STORAGE_FALLBACK_ENV, KNOWLEDGE_STORAG
 export type { StorageEnv, StorageMode, StorageStatus, StorageStatusOptions, StorageSyncOptions, StorageRemoteAdapter, SyncMeta, SyncResult, } from './db/storage-sync.js';
 export { PgAdapterAsync, createKnowledgeCloudClient, KNOWLEDGE_APP_NAME } from './db/remote-storage.js';
 export { PG_MIGRATIONS } from './db/pg-migrations.js';
-export { KIT_VERSION, createPgPool, createCloudPoolFromEnv, createQueryClient, wrapExecutor, resolveStorageMode, resolveDatabaseUrl, normalizeStorageMode as normalizeCloudStorageMode, storageEnvKeys, MigrationLedger, createMigrationLedger, defineMigration, checksumSql, checkHealth, checkReady, } from './generated/storage-kit/index.js';
+export { KIT_VERSION, createPgPool, createCloudPoolFromEnv, createQueryClient, wrapExecutor, resolveStorageMode, resolveDatabaseUrl, resolveTlsConfig, normalizeStorageMode as normalizeCloudStorageMode, storageEnvKeys, MigrationLedger, createMigrationLedger, defineMigration, checksumSql, checkHealth, checkReady, } from './generated/storage-kit/index.js';
 export type { PoolQueryClient, TypedQueryClient, PgExecutor, CreatePgPoolOptions, CreateCloudPoolFromEnvOptions, CloudPoolFromEnv, Migration, MigrationResult, StorageModeResolution, } from './generated/storage-kit/index.js';

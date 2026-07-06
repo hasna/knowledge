@@ -25814,6 +25814,27 @@ function summariesMatch(left, right) {
 function migrationTimestamp(now) {
   return now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
+function moveWorkspace(sourceHome, targetHome) {
+  try {
+    renameSync2(sourceHome, targetHome);
+    return;
+  } catch (error51) {
+    cpSync(sourceHome, targetHome, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      preserveTimestamps: true
+    });
+    try {
+      rmSync(sourceHome, { recursive: true, force: false });
+    } catch (removeError) {
+      rmSync(targetHome, { recursive: true, force: true });
+      throw removeError;
+    }
+    if (error51 instanceof Error && error51.message.includes("EXDEV"))
+      return;
+  }
+}
 function isMigrationTombstone(workspace, summary, currentHome) {
   if (!summary.exists)
     return false;
@@ -25929,7 +25950,7 @@ function migrateLegacyKnowledgeWorkspace(options) {
   if (currentBefore.exists && currentIsDefaultScaffold) {
     rmSync(options.current.home, { recursive: true, force: true });
   }
-  renameSync2(options.legacy.home, options.current.home);
+  moveWorkspace(options.legacy.home, options.current.home);
   const currentAfter = summarizeWorkspaceTree(options.current);
   checks3.migrated_matches_backup = summariesMatch(backupAfter, currentAfter);
   mkdirSync4(options.legacy.home, { recursive: true });
@@ -28608,11 +28629,11 @@ function loadCaBundle(options) {
 }
 function resolveTlsConfig(connectionString, options = {}) {
   const mode = sslModeFromConnectionString(connectionString);
-  if (mode === "disable" || mode === "prefer") {
+  if (mode === "disable") {
     return;
   }
   const ca = loadCaBundle(options);
-  if (mode === "require") {
+  if (mode === "prefer" || mode === "require") {
     return ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
   }
   if (!ca) {

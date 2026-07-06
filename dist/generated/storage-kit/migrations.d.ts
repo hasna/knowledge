@@ -42,6 +42,7 @@ export declare class MigrationLedger {
     migrate(opts?: {
         dryRun?: boolean;
     }): Promise<MigrationResult>;
+    private applyPendingMigration;
 }
 /** Convenience: build a ledger and run all pending migrations. */
 export declare function createMigrationLedger(client: TypedQueryClient, migrations: readonly Migration[], options?: MigrationRunnerOptions): MigrationLedger;

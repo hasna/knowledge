@@ -45,6 +45,7 @@ export {
   wrapExecutor,
   resolveStorageMode,
   resolveDatabaseUrl,
+  resolveTlsConfig,
   normalizeStorageMode as normalizeCloudStorageMode,
   storageEnvKeys,
   MigrationLedger,

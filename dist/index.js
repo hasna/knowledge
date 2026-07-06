@@ -16011,11 +16011,11 @@ function loadCaBundle(options) {
 }
 function resolveTlsConfig(connectionString, options = {}) {
   const mode = sslModeFromConnectionString(connectionString);
-  if (mode === "disable" || mode === "prefer") {
+  if (mode === "disable") {
     return;
   }
   const ca = loadCaBundle(options);
-  if (mode === "require") {
+  if (mode === "prefer" || mode === "require") {
     return ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
   }
   if (!ca) {
@@ -16133,6 +16133,9 @@ function checksumSql(sql) {
 function defineMigration(id, sql) {
   return Object.freeze({ id, sql: sql.trim(), checksum: checksumSql(sql) });
 }
+function hasTransaction(client) {
+  return typeof client.transaction === "function";
+}
 
 class MigrationLedger {
   client;
@@ -16197,10 +16200,29 @@ class MigrationLedger {
     for (const item of plan) {
       if (item.state === "already_applied")
         continue;
-      await this.client.execute(item.migration.sql);
-      await this.client.execute(`INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`, [item.migration.id, item.migration.checksum]);
+      await this.applyPendingMigration(item.migration);
     }
     return { dryRun, applied: await this.readApplied(), plan };
+  }
+  async applyPendingMigration(migration) {
+    const apply = async (client) => {
+      await client.execute(migration.sql);
+      await client.execute(`INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`, [migration.id, migration.checksum]);
+    };
+    if (hasTransaction(this.client)) {
+      await this.client.transaction(apply);
+      return;
+    }
+    await this.client.execute("BEGIN");
+    try {
+      await apply(this.client);
+      await this.client.execute("COMMIT");
+    } catch (error) {
+      try {
+        await this.client.execute("ROLLBACK");
+      } catch {}
+      throw error;
+    }
   }
 }
 function createMigrationLedger(client, migrations, options = {}) {
@@ -26785,6 +26807,27 @@ function summariesMatch(left, right) {
 function migrationTimestamp(now) {
   return now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
+function moveWorkspace(sourceHome, targetHome) {
+  try {
+    renameSync2(sourceHome, targetHome);
+    return;
+  } catch (error51) {
+    cpSync(sourceHome, targetHome, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      preserveTimestamps: true
+    });
+    try {
+      rmSync(sourceHome, { recursive: true, force: false });
+    } catch (removeError) {
+      rmSync(targetHome, { recursive: true, force: true });
+      throw removeError;
+    }
+    if (error51 instanceof Error && error51.message.includes("EXDEV"))
+      return;
+  }
+}
 function isMigrationTombstone(workspace, summary, currentHome) {
   if (!summary.exists)
     return false;
@@ -26900,7 +26943,7 @@ function migrateLegacyKnowledgeWorkspace(options) {
   if (currentBefore.exists && currentIsDefaultScaffold) {
     rmSync(options.current.home, { recursive: true, force: true });
   }
-  renameSync2(options.legacy.home, options.current.home);
+  moveWorkspace(options.legacy.home, options.current.home);
   const currentAfter = summarizeWorkspaceTree(options.current);
   checks3.migrated_matches_backup = summariesMatch(backupAfter, currentAfter);
   mkdirSync4(options.legacy.home, { recursive: true });

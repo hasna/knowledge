@@ -64,8 +64,16 @@ interface LedgerRow {
   applied_at: string | Date;
 }
 
+interface TransactionalQueryClient extends TypedQueryClient {
+  transaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T>;
+}
+
 export interface MigrationRunnerOptions {
   ledgerTable?: string;
+}
+
+function hasTransaction(client: TypedQueryClient): client is TransactionalQueryClient {
+  return typeof (client as { transaction?: unknown }).transaction === "function";
 }
 
 export class MigrationLedger {
@@ -143,13 +151,37 @@ export class MigrationLedger {
 
     for (const item of plan) {
       if (item.state === "already_applied") continue;
-      await this.client.execute(item.migration.sql);
-      await this.client.execute(
-        `INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`,
-        [item.migration.id, item.migration.checksum],
-      );
+      await this.applyPendingMigration(item.migration);
     }
     return { dryRun, applied: await this.readApplied(), plan };
+  }
+
+  private async applyPendingMigration(migration: Migration): Promise<void> {
+    const apply = async (client: TypedQueryClient): Promise<void> => {
+      await client.execute(migration.sql);
+      await client.execute(
+        `INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`,
+        [migration.id, migration.checksum],
+      );
+    };
+
+    if (hasTransaction(this.client)) {
+      await this.client.transaction(apply);
+      return;
+    }
+
+    await this.client.execute("BEGIN");
+    try {
+      await apply(this.client);
+      await this.client.execute("COMMIT");
+    } catch (error) {
+      try {
+        await this.client.execute("ROLLBACK");
+      } catch {
+        // Surface the migration failure; rollback failure is secondary.
+      }
+      throw error;
+    }
   }
 }
 
