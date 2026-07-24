@@ -276,7 +276,7 @@ describe('public knowledge sdk', () => {
     expect(paths.knowledge_db_exists).toBe(false);
     expect(existsSync(join(dir, '.hasna', 'knowledge'))).toBe(false);
 
-    expect(client.inventory().paths.knowledge_db_exists).toBe(false);
+    expect((await client.inventory()).paths.knowledge_db_exists).toBe(false);
     expect(existsSync(join(dir, '.hasna', 'knowledge'))).toBe(false);
 
     const search = await client.search({ query: 'missing sdk scope' });

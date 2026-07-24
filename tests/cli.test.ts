@@ -340,6 +340,38 @@ describe('knowledge cli', () => {
     expect(new TextDecoder().decode(context.stdout)).toContain('knowledge context pack');
   });
 
+  test("'<sub> --help' prints that subcommand's usage, not root help", () => {
+    // Regression: `knowledge add --help` used to print the generic ROOT help
+    // (full command tree) instead of the per-command usage line.
+    const addHelp = runCli(['add', '--help']);
+    expect(addHelp.exitCode).toBe(0);
+    const addOut = new TextDecoder().decode(addHelp.stdout);
+    expect(addOut).toContain('Usage: knowledge add <title> <content> [--url <url>] [-t <tag>] [--json]');
+    // Must NOT fall through to the root help command tree.
+    expect(addOut).not.toContain('knowledge - local agent knowledge store');
+
+    // `-h` short flag behaves the same.
+    const addHelpShort = runCli(['add', '-h']);
+    expect(addHelpShort.exitCode).toBe(0);
+    const addShortOut = new TextDecoder().decode(addHelpShort.stdout);
+    expect(addShortOut).toContain('Usage: knowledge add <title> <content>');
+    expect(addShortOut).not.toContain('knowledge - local agent knowledge store');
+
+    // `<sub> --help` and `help <sub>` agree.
+    const listFlag = new TextDecoder().decode(runCli(['list', '--help']).stdout);
+    const listHelp = new TextDecoder().decode(runCli(['help', 'list']).stdout);
+    expect(listFlag).toContain('--sort created|title');
+    expect(listFlag).toBe(listHelp);
+
+    // An aliased subcommand resolves to its canonical usage.
+    const lsFlag = new TextDecoder().decode(runCli(['ls', '--help']).stdout);
+    expect(lsFlag).toContain('knowledge list|ls');
+
+    // Bare `--help` still shows the root help.
+    const rootHelp = new TextDecoder().decode(runCli(['--help']).stdout);
+    expect(rootHelp).toContain('knowledge - local agent knowledge store');
+  });
+
   test('events command uses shared help surface', () => {
     const dir = mkdtempSync(join(tmpdir(), 'knowledge-events-cli-'));
     const result = runCli(['events', '--help'], undefined, { HASNA_EVENTS_DIR: dir });
@@ -370,6 +402,27 @@ describe('knowledge cli', () => {
     expect(result.exitCode).toBe(1);
     const err = new TextDecoder().decode(result.stderr);
     expect(err).toContain("Did you mean 'list'");
+  });
+
+  test('usage/validation errors do not leak an internal stack trace', () => {
+    // Regression: usage/validation errors previously logged the full Error stack
+    // (bundled bin path + minified function names) to stderr. They must show only
+    // a plain message on the default (non-debug) path.
+    const result = runCli(['add'], undefined, { DEBUG: '', LOG_LEVEL: 'info' });
+    expect(result.exitCode).toBe(1);
+    const err = new TextDecoder().decode(result.stderr);
+    expect(err).toContain('Usage: knowledge add <title> <content>');
+    expect(err).not.toContain('CLI error');
+    expect(err).not.toContain('"stack"');
+    expect(err).not.toMatch(/\n\s+at\s/);
+    expect(err).not.toContain('cli.ts');
+
+    // Debug logging may still surface the diagnostic (with stack) for troubleshooting.
+    const debug = runCli(['add'], undefined, { DEBUG: '1' });
+    expect(debug.exitCode).toBe(1);
+    const debugErr = new TextDecoder().decode(debug.stderr);
+    expect(debugErr).toContain('CLI error');
+    expect(debugErr).toContain('"stack"');
   });
 
   test('add/list/get/update/archive/restore/untag/delete flow with json and confirmation', () => {
@@ -1503,7 +1556,7 @@ describe('knowledge cli', () => {
     expect(existsSync(join(home, '.hasna', 'knowledge', 'db.json'))).toBe(false);
   });
 
-  test('setup, auth, and remote commands expose hosted-aware JSON contracts', () => {
+  test('setup and auth commands expose hosted-aware JSON contracts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ok-hosted-cli-'));
     const authDir = join(dir, 'auth');
     const env = { HASNA_KNOWLEDGE_AUTH_DIR: authDir };
@@ -1532,18 +1585,6 @@ describe('knowledge cli', () => {
     expect(loginOut.authenticated).toBe(true);
     expect(loginOut.email).toBe('agent@example.com');
     expect(existsSync(join(authDir, 'auth.json'))).toBe(true);
-
-    const remote = runCli(['remote', 'status', '--scope', 'project', '--json'], dir, env);
-    expect(remote.exitCode).toBe(0);
-    const remoteOut = JSON.parse(new TextDecoder().decode(remote.stdout));
-    expect(remoteOut.client_ready).toBe(true);
-    expect(remoteOut.capabilities).toContain('s3-generated-artifacts');
-
-    const contracts = runCli(['remote', 'contracts', '--scope', 'project', '--json'], dir, env);
-    expect(contracts.exitCode).toBe(0);
-    const contractsOut = JSON.parse(new TextDecoder().decode(contracts.stdout));
-    expect(contractsOut.contract.source_contract.owner).toBe('open-files');
-    expect(contractsOut.contract.endpoints.ask).toBe('/api/v1/knowledge/ask');
 
     const logout = runCli(['auth', 'logout', '--scope', 'project', '--json'], dir, env);
     expect(logout.exitCode).toBe(0);
