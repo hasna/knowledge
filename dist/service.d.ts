@@ -393,6 +393,7 @@ export declare class KnowledgeService {
     artifactStore(): import("./artifact-store").ArtifactStore;
     storageContract(): StorageContract;
     validateStorage(): StorageValidationResult;
+    assertStorageValid(action: string): void;
     migrateLegacyPath(options?: {
         approveWrite?: boolean;
         approvedBy?: string;

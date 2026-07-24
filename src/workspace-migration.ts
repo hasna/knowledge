@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { openKnowledgeDbReadonly } from './knowledge-db';
 import {
   cpSync,
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -568,6 +569,14 @@ function removeWorkspaceWithRetries(path: string): void {
   throw lastError;
 }
 
+function chmodOwnerOnlyTree(path: string): void {
+  if (!existsSync(path)) return;
+  const stat = lstatSync(path);
+  chmodSync(path, stat.isDirectory() ? 0o700 : 0o600);
+  if (!stat.isDirectory()) return;
+  for (const entry of readdirSync(path)) chmodOwnerOnlyTree(join(path, entry));
+}
+
 function isRetainedTombstoneFile(file: string): boolean {
   return file === 'TOMBSTONE.md'
     || file === 'migration.json'
@@ -736,6 +745,7 @@ export function migrateLegacyKnowledgeWorkspace(
     errorOnExist: true,
     preserveTimestamps: true,
   });
+  chmodOwnerOnlyTree(backupHome);
   const backupWorkspace = workspaceForHome(backupHome);
   const backupSnapshot = summarizeWorkspaceTree(backupWorkspace, { includeSqlite: false });
   checks.backup_matches_legacy = summariesMatch(legacyBefore, backupSnapshot);
@@ -765,8 +775,10 @@ export function migrateLegacyKnowledgeWorkspace(
     '',
     'This directory is a diagnostic tombstone only. OpenKnowledge reads and writes the canonical .hasna/knowledge workspace.',
     '',
-  ].join('\n'));
-  writeFileSync(join(options.legacy.home, 'migration.json'), `${JSON.stringify({
+  ].join('\n'), { mode: 0o600 });
+  chmodSync(tombstonePath, 0o600);
+  const migrationJsonPath = join(options.legacy.home, 'migration.json');
+  writeFileSync(migrationJsonPath, `${JSON.stringify({
     migrated_at: now.toISOString(),
     approved_by: options.approvedBy,
     new_path: options.current.home,
@@ -774,7 +786,8 @@ export function migrateLegacyKnowledgeWorkspace(
     legacy_before: legacyBeforeOutput,
     backup_after: backupAfter,
     current_after: currentAfter,
-  }, null, 2)}\n`);
+  }, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(migrationJsonPath, 0o600);
   checks.tombstone_written = existsSync(tombstonePath);
 
   const ok = checks.backup_matches_legacy && checks.migrated_matches_backup && checks.tombstone_written;

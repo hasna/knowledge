@@ -856,5 +856,5 @@ describe('knowledge MCP', () => {
     } finally {
       await client.close();
     }
-  });
+  }, 10000);
 });

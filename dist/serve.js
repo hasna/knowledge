@@ -781,6 +781,7 @@ function knowledgeRegistryContract(input) {
 
 // src/store.ts
 import {
+  chmodSync as chmodSync2,
   closeSync,
   existsSync as existsSync2,
   fsyncSync,
@@ -795,7 +796,7 @@ import { randomUUID } from "crypto";
 import { basename, dirname as dirname2, join as join2 } from "path";
 
 // src/workspace.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 var HASNA_KNOWLEDGE_APP_PATH = join(".hasna", "knowledge");
@@ -933,7 +934,7 @@ function defaultKnowledgeConfig() {
 }
 function ensureKnowledgeWorkspace(home) {
   const workspace = workspaceForHome(home);
-  mkdirSync(workspace.home, { recursive: true });
+  mkdirSync(workspace.home, { recursive: true, mode: 448 });
   for (const dir of [
     workspace.artifactsDir,
     workspace.cacheDir,
@@ -944,11 +945,12 @@ function ensureKnowledgeWorkspace(home) {
     workspace.schemasDir,
     workspace.wikiDir
   ]) {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 448 });
   }
   if (!existsSync(workspace.configPath)) {
     writeFileSync(workspace.configPath, `${JSON.stringify(defaultKnowledgeConfig(), null, 2)}
-`);
+`, { mode: 384 });
+    chmodSync(workspace.configPath, 384);
   }
   return workspace;
 }
@@ -968,7 +970,8 @@ function readKnowledgeConfig(path) {
 function writeKnowledgeConfig(path, config) {
   ensureParentDir(path);
   writeFileSync(path, `${JSON.stringify(config, null, 2)}
-`);
+`, { mode: 384 });
+  chmodSync(path, 384);
 }
 
 // src/store.ts
@@ -1009,7 +1012,8 @@ function storeContainsItem(index, item) {
 function writeJsonFile(path, value) {
   ensureParentDir(path);
   writeFileSync2(path, `${JSON.stringify(value, null, 2)}
-`);
+`, { mode: 384 });
+  chmodSync2(path, 384);
 }
 function readStoreFileForImport(path) {
   const value = JSON.parse(readFileSync3(path, "utf8"));
@@ -1157,6 +1161,9 @@ function writeFileAtomic(path, contents) {
     closeSync(fd);
     fd = null;
     renameSync(tmp, path);
+    try {
+      chmodSync2(path, 384);
+    } catch {}
     syncParentDir(path);
   } catch (error) {
     if (fd !== null) {

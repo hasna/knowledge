@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0
  */
 import {
+  chmodSync,
   closeSync,
   existsSync,
   fsyncSync,
@@ -100,7 +101,8 @@ function storeContainsItem(index: Set<string>, item: KnowledgeItem): boolean {
 
 function writeJsonFile(path: string, value: unknown): void {
   ensureParentDir(path);
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 function readStoreFileForImport(path: string): { store: Store; skippedInvalid: number } {
@@ -273,6 +275,11 @@ function writeFileAtomic(path: string, contents: string): void {
     closeSync(fd);
     fd = null;
     renameSync(tmp, path);
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // Owner-only hardening is best-effort on filesystems without POSIX modes.
+    }
     syncParentDir(path);
   } catch (error) {
     if (fd !== null) {
