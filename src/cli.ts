@@ -518,7 +518,16 @@ async function run(argv: string[]): Promise<void> {
 
   let command = resolveCommand(positional[0]);
   let commandArgOffset = 1;
-  if (invokedAsKnowledge() && command && !COMMANDS.includes(command)) {
+  // Natural-language shorthand: when invoked as the `knowledge` bin, a multi-word prompt
+  // is treated as `knowledge ask <prompt>` — whether passed as separate words
+  // (`knowledge how do I cite the handbook`, multiple positionals) or as a single quoted
+  // string (`knowledge "How do we cite the handbook?"`, one positional containing spaces;
+  // the canonical documented form). A single bare token with no whitespace is almost always
+  // a mistyped command (`knowledge lst`, `knowledge boguscmd`), so it is NOT remapped — it
+  // falls through to the unknown-command handler below and exits non-zero, instead of
+  // silently running an ask/build search and returning false success to scripts.
+  const looksLikeNaturalLanguage = positional.length > 1 || /\s/.test(command);
+  if (invokedAsKnowledge() && command && !COMMANDS.includes(command) && looksLikeNaturalLanguage) {
     command = 'ask';
     commandArgOffset = 0;
   }
@@ -573,7 +582,7 @@ async function run(argv: string[]): Promise<void> {
 
   // Single knowledge-item Store abstraction. When the client-flip resolves to
   // the cloud HTTP transport (HASNA_KNOWLEDGE_API_URL + HASNA_KNOWLEDGE_API_KEY,
-  // and/or *_STORAGE_MODE) ALL item reads/writes go to https://knowledge.hasna.xyz/v1
+  // and/or *_STORAGE_MODE) ALL item reads/writes go to the configured API's /v1
   // with the bearer key; otherwise the on-box JSON store. An explicit --store
   // override always pins to the local transport (fully reversible). Every item
   // command below routes through `itemStore` — never the JSON file or HTTP
@@ -1668,17 +1677,33 @@ async function run(argv: string[]): Promise<void> {
   throw new Error(`Unknown command: ${positional[0]}.${hint} Run 'knowledge --help' for available commands.`);
 }
 
-if (import.meta.main) {
-  run(process.argv.slice(2)).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    // Keep the internal stack (which includes the bundled bin path and minified
-    // function names) behind debug logging. Usage/validation and other expected
-    // errors should present a plain message only. Set DEBUG=1 or LOG_LEVEL=debug
-    // to surface the full diagnostic for troubleshooting.
-    log('debug', 'CLI error', { message, stack: error instanceof Error ? error.stack : undefined });
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-  });
+/**
+ * Report a fatal CLI error while honoring the --json output contract.
+ *
+ * The human-readable diagnostic is always written to stderr (`Error: <msg>`),
+ * so tooling that reads stderr keeps working regardless of `--json`. When
+ * `--json` is present, a machine-parseable `{ ok: false, error, message }`
+ * object is additionally emitted on stdout (mirroring the `{ ok: true, ... }`
+ * success contract) so that consumers parsing `<cmd> --json` can detect and
+ * read the failure on stdout instead of getting nothing.
+ */
+function emitCliError(error: unknown, argv: string[]): void {
+  const message = error instanceof Error ? error.message : String(error);
+  // Keep the internal stack (which includes the bundled bin path and minified
+  // function names) behind debug logging. Usage/validation and other expected
+  // errors should present a plain message only. Set DEBUG=1 or LOG_LEVEL=debug
+  // to surface the full diagnostic for troubleshooting.
+  log('debug', 'CLI error', { message, stack: error instanceof Error ? error.stack : undefined });
+  console.error(`Error: ${message}`);
+  if (argv.includes('--json')) {
+    output({ ok: false, error: message, message }, true);
+  }
+  process.exitCode = 1;
 }
 
-export { run, parseArgs, suggestCommand, sortItems };
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  run(argv).catch((error) => emitCliError(error, argv));
+}
+
+export { run, parseArgs, suggestCommand, sortItems, emitCliError };

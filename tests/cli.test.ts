@@ -52,11 +52,9 @@ function runKnowledgeBin(args: string[], cwd?: string, env?: Record<string, stri
   const wrapper = join(dir, 'knowledge');
   writeFileSync(wrapper, [
     '#!/usr/bin/env bun',
-    `import { run } from ${JSON.stringify(pathToFileURL(CLI).href)};`,
-    'run(process.argv.slice(2)).catch((error) => {',
-    '  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);',
-    '  process.exitCode = 1;',
-    '});',
+    `import { run, emitCliError } from ${JSON.stringify(pathToFileURL(CLI).href)};`,
+    'const argv = process.argv.slice(2);',
+    'run(argv).catch((error) => emitCliError(error, argv));',
     '',
   ].join('\n'));
   return Bun.spawnSync(['bun', wrapper, ...args], {
@@ -114,7 +112,7 @@ function createSchema7KnowledgeDb(dbPath: string): void {
       FROM wiki_pages;
       DROP TABLE wiki_pages;
       ALTER TABLE wiki_pages_v7 RENAME TO wiki_pages;
-      DELETE FROM schema_versions WHERE version = 8;
+      DELETE FROM schema_versions WHERE version >= 8;
       PRAGMA foreign_keys = ON;
     `);
   } finally {
@@ -404,6 +402,51 @@ describe('knowledge cli', () => {
     expect(err).toContain("Did you mean 'list'");
   });
 
+  test('knowledge bin rejects unknown single-token command instead of running ask', () => {
+    // Regression: when invoked as the `knowledge` bin, an unknown top-level command
+    // (`knowledge boguscmd`, `knowledge lst`) was silently remapped to an ask/build
+    // search prompt and exited 0, returning false success to scripts. It must now fail.
+    for (const bogus of ['boguscmd', 'lst']) {
+      const result = runKnowledgeBin([bogus]);
+      expect(result.exitCode).toBe(1);
+      const out = new TextDecoder().decode(result.stdout);
+      const err = new TextDecoder().decode(result.stderr);
+      expect(out).not.toContain('Prepared citation context draft');
+      expect(err).toContain(`Unknown command: ${bogus}`);
+    }
+    // The `lst` typo should also surface the levenshtein suggestion.
+    const typo = runKnowledgeBin(['lst']);
+    expect(new TextDecoder().decode(typo.stderr)).toContain("Did you mean 'list'");
+  }, 20000);
+
+  test('knowledge bin keeps multi-word natural-language ask shorthand', () => {
+    // The documented `knowledge <prompt>` shorthand for multi-word prompts must still
+    // route to ask/build so genuine natural-language queries keep working. Use an
+    // isolated HOME so the ask searches an empty store (fast, deterministic) rather
+    // than the operator's real global knowledge DB.
+    const dir = mkdtempSync(join(tmpdir(), 'ok-nl-ask-'));
+    const home = mkdtempSync(join(tmpdir(), 'ok-nl-ask-home-'));
+    const result = runKnowledgeBin(['how', 'do', 'I', 'cite', 'sources', '--scope', 'project', '--json'], dir, isolatedHomeEnv(home));
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(new TextDecoder().decode(result.stdout));
+    expect(out.ok).toBe(true);
+    expect(out.prompt).toBe('how do I cite sources');
+  }, 20000);
+
+  test('knowledge bin keeps quoted single-token natural-language ask shorthand', () => {
+    // Regression guard: the canonical documented form passes the whole prompt as one
+    // quoted argument (`knowledge "How do we cite handbook policy?"`), so it arrives as a
+    // single positional token that CONTAINS whitespace. It must still route to ask/build
+    // (not be rejected as an unknown single-token command).
+    const dir = mkdtempSync(join(tmpdir(), 'ok-nl-ask-quoted-'));
+    const home = mkdtempSync(join(tmpdir(), 'ok-nl-ask-quoted-home-'));
+    const result = runKnowledgeBin(['How do we cite handbook policy?', '--scope', 'project', '--json'], dir, isolatedHomeEnv(home));
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(new TextDecoder().decode(result.stdout));
+    expect(out.ok).toBe(true);
+    expect(out.prompt).toBe('How do we cite handbook policy?');
+  }, 20000);
+
   test('usage/validation errors do not leak an internal stack trace', () => {
     // Regression: usage/validation errors previously logged the full Error stack
     // (bundled bin path + minified function names) to stderr. They must show only
@@ -423,6 +466,34 @@ describe('knowledge cli', () => {
     const debugErr = new TextDecoder().decode(debug.stderr);
     expect(debugErr).toContain('CLI error');
     expect(debugErr).toContain('"stack"');
+  });
+
+  test('--json error paths emit a machine-parseable object on stdout', () => {
+    // Each of these commands fails; with --json the failure must be readable
+    // on stdout as { ok: false, error }, not only as plaintext on stderr.
+    const cases: string[][] = [
+      ['add', '--json'], // missing required title/content
+      ['providers', 'check', 'nonexistent', '--json'], // unsupported provider
+      ['lits', '--json'], // unknown command
+      ['get', '--json'], // missing required --id
+    ];
+    for (const args of cases) {
+      const result = runCli(args);
+      expect(result.exitCode).toBe(1);
+      const stdout = new TextDecoder().decode(result.stdout).trim();
+      expect(stdout.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.ok).toBe(false);
+      expect(typeof parsed.error).toBe('string');
+      expect(parsed.error.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('non-json error paths keep plaintext stderr and empty stdout', () => {
+    const result = runCli(['add']);
+    expect(result.exitCode).toBe(1);
+    expect(new TextDecoder().decode(result.stdout).trim()).toBe('');
+    expect(new TextDecoder().decode(result.stderr)).toContain('Error:');
   });
 
   test('add/list/get/update/archive/restore/untag/delete flow with json and confirmation', () => {
@@ -1624,13 +1695,13 @@ describe('knowledge cli', () => {
     const init = runCli(['db', 'init', '--scope', 'project', '--json'], dir);
     expect(init.exitCode).toBe(0);
     const initOut = JSON.parse(new TextDecoder().decode(init.stdout));
-    expect(initOut.schema_version).toBe(8);
+    expect(initOut.schema_version).toBe(9);
     expect(existsSync(join(dir, '.hasna', 'knowledge', 'knowledge.db'))).toBe(true);
 
     const stats = runCli(['db', 'stats', '--scope', 'project', '--json'], dir);
     expect(stats.exitCode).toBe(0);
     const statsOut = JSON.parse(new TextDecoder().decode(stats.stdout));
-    expect(statsOut.schema_version).toBe(8);
+    expect(statsOut.schema_version).toBe(9);
     expect(statsOut.sources).toBe(0);
     expect(statsOut.runs).toBe(0);
 
@@ -1656,7 +1727,7 @@ describe('knowledge cli', () => {
     expect(init.exitCode).toBe(0);
     const initOut = JSON.parse(new TextDecoder().decode(init.stdout));
     expect(initOut.ok).toBe(true);
-    expect(initOut.schema_version).toBe(8);
+    expect(initOut.schema_version).toBe(9);
 
     const stats = runCli(['db', 'stats', '--scope', 'global', '--json'], dir, {
       HOME: home,
@@ -1664,7 +1735,7 @@ describe('knowledge cli', () => {
     });
     expect(stats.exitCode).toBe(0);
     const statsOut = JSON.parse(new TextDecoder().decode(stats.stdout));
-    expect(statsOut.schema_version).toBe(8);
+    expect(statsOut.schema_version).toBe(9);
 
     const db = openKnowledgeDb(dbPath);
     try {
@@ -1698,7 +1769,7 @@ describe('knowledge cli', () => {
     const statusAfterSnapshot = runCli(['sync', 'status', '--scope', 'project', '--json'], dir);
     expect(statusAfterSnapshot.exitCode).toBe(0);
     const statusAfterSnapshotOut = JSON.parse(new TextDecoder().decode(statusAfterSnapshot.stdout));
-    expect(statusAfterSnapshotOut.sqlite_schema_version).toBe(8);
+    expect(statusAfterSnapshotOut.sqlite_schema_version).toBe(9);
 
     const machines = runCli(['sync', 'machines', '--scope', 'project', '--json'], dir);
     expect(machines.exitCode).toBe(0);

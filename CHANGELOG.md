@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.88
+## 0.2.90
 
 Harden the local JSON item-store against lock corruption and add a sanctioned
 recovery path for merging a legacy app-folder workspace into a populated
@@ -18,6 +18,41 @@ canonical workspace.
   under a lock, and is idempotent on rerun.
 - Avoid opening SQLite (WAL locks) while summarizing a workspace that is about to
   be moved during `migrate-legacy-path`.
+
+## 0.2.89
+
+Harden public npm package contents so internal docs never ship. The published
+package previously included the entire `docs/` and `scripts/` trees via broad
+`files` entries, which packed `docs/canonical-secrets-bootstrap-2026-06-08.md`
+(internal secret-path topology and account references) into the public tarball.
+
+- Replace the broad `docs` and `scripts` entries in `package.json` `files` with an
+  explicit allowlist of public guides and dev scripts; the internal
+  secrets-bootstrap runbook is now excluded from the package.
+- Add `scripts/validate-public-package.mjs` (`npm run release:pack:check`), a
+  fail-closed check that diffs `npm pack --dry-run` against the allowlist and
+  rejects any unreviewed or forbidden docs/scripts path. Wired into
+  `prepublishOnly`.
+- Add `tests/package-release.test.ts` (`bun run test:package`) asserting the
+  allowlist and the packed manifest.
+- Document the allowlist policy in `README.md` and `SECURITY.md`.
+
+## 0.2.88
+
+Security/hygiene: stop shipping the internal infra host `knowledge.hasna.xyz` as the
+default hosted API URL in the published package. The default now resolves to the public
+product domain `https://knowledge.md`.
+
+- `DEFAULT_KNOWLEDGE_API_URL` (`src/auth.ts`), `defaultKnowledgeConfig()` hosted default
+  (`src/workspace.ts`), the `normalizeMode` alias (`src/service.ts`), and doc comments in
+  `src/cli.ts` / `src/cloud-store.ts` now use `knowledge.md` instead of the internal host.
+- Propagated to README, `docs/examples`, `docs/migration`, and `tests/cloud-store.test.ts`.
+- Rebuilt `dist/` and `bin/` (shipped artifacts) so the leaked default is gone from what
+  installs actually run, not just source.
+- Known residual (out of scope, needs a `@hasna/contracts` fix): when hosted mode is set
+  with a key but no URL, `defaultCloudBaseUrl()` in `@hasna/contracts` still templates
+  `https://<app>.hasna.xyz`. `createClientTransport` exposes no base-URL override, so this
+  repo cannot close that path alone. Documented explicitly in `tests/cloud-store.test.ts`.
 
 ## 0.2.87
 

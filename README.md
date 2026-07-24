@@ -164,7 +164,7 @@ knowledge sync push --peer-workspace /path/to/peer/repo --scope project --json
 knowledge sync dry-run --machine linux-node-a --peer-workspace /workspace/open-knowledge --scope project --json
 
 # Configure optional hosted mode and inspect remote contracts
-knowledge setup --mode hosted --api-url https://knowledge.hasna.xyz --scope project --json
+knowledge setup --mode hosted --api-url https://knowledge.md --scope project --json
 knowledge auth whoami --scope project --json
 knowledge remote contracts --scope project --json
 
@@ -246,6 +246,11 @@ HASNA_KNOWLEDGE_WEB_SEARCH=1 knowledge web search "latest AI SDK web search" --p
   local/S3/hosted sync boundaries.
 - [Hosted wrapper responsibilities](docs/architecture/hosted-wrapper-responsibilities.md):
   what a future SaaS layer owns outside the OSS package.
+
+Only the public guides linked above are included in the npm package. Internal
+evidence, topology notes, and secret-bootstrap runbooks must stay out of the
+package docs allowlist; run `npm run release:pack:check` before publishing to
+validate the packed contents.
 
 ## Commands
 
@@ -533,7 +538,7 @@ flip — `HASNA_KNOWLEDGE_API_URL` + `HASNA_KNOWLEDGE_API_KEY` — instead.)
 ### setup / auth / remote
 ```bash
 knowledge setup --mode local [--scope project] [--json]
-knowledge setup --mode hosted [--api-url https://knowledge.hasna.xyz] [--scope project] [--json]
+knowledge setup --mode hosted [--api-url https://knowledge.md] [--scope project] [--json]
 knowledge setup --mode hosted --canonical-example [--scope project] [--json]
 knowledge auth login --api-key <key> [--email you@example.com] [--org <slug>] [--scope project] [--json]
 knowledge auth whoami [--scope project] [--json]

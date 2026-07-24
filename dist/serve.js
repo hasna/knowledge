@@ -878,7 +878,7 @@ function defaultKnowledgeConfig() {
     version: 1,
     mode: "local",
     hosted: {
-      api_url: "https://knowledge.hasna.xyz"
+      api_url: "https://knowledge.md"
     },
     storage: {
       type: "local",
