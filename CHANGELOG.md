@@ -19,6 +19,44 @@ canonical workspace.
 - Avoid opening SQLite (WAL locks) while summarizing a workspace that is about to
   be moved during `migrate-legacy-path`.
 
+## Unreleased — inventory paths block fix
+
+Fix `knowledge inventory --json` reporting the wrong `paths` block in
+self_hosted/cloud (api) mode, where it disagreed with `knowledge paths`.
+
+- fix(knowledge): the `inventory` `paths` block now reflects the real on-box
+  workspace layout (`json_store_path` = `workspace.jsonStorePath`,
+  `json_store_exists` / `knowledge_db_exists` via read-only `existsSync`),
+  matching `knowledge paths`. Previously `itemOnlyInventory()` echoed the cloud
+  transport URL as `json_store_path` and hardcoded `knowledge_db_exists: false`.
+  The cloud item-corpus source location is still surfaced via `legacy_store.path`.
+- test(knowledge): `tests/cloud-inventory.test.ts` now asserts `inventory.paths`
+  equals `service.paths()` for all four path fields, that the `/v1` URL never
+  appears in the paths block, and that it is reported on `legacy_store.path`.
+- Rebuilt generated bundles so shipped artifacts carry the fix and
+  `verify:generated` passes.
+
+## Unreleased — Search overhaul, Stage 2 (Postgres full-text parity)
+
+Top-priority correctness fix: the hosted (cloud) notes list returned materially
+different, near-empty results versus local. Brings cloud search to parity with
+the local SQLite FTS behavior shipped in Stage 1 (#29).
+
+- Replaced the `title/content ILIKE '%q%'` + `ORDER BY created_at DESC` cloud
+  path (`NoteRepo.list`, `src/serve.ts`) with a weighted `tsvector` generated
+  column (title = A, content = B) + GIN index (`src/db/pg-migrations.ts`),
+  queried via `websearch_to_tsquery('english', …)` and ranked by `ts_rank_cd`
+  (created_at as a deterministic tiebreak). Fixes the "cloud returns nothing"
+  bug where multi-term / word-order-varying queries matched no substring and
+  results were ordered by recency rather than relevance.
+- Postgres migrations are **appended** to `PG_MIGRATIONS` (index-derived ids,
+  never inserted mid-array) and are idempotent.
+- Added an in-process Postgres (`@electric-sql/pglite`, devDependency) parity
+  suite (`tests/search-pg-parity.test.ts`) running the real `NoteRepo` against
+  the real migrations, asserting word-order independence, relevance-over-recency,
+  phrase adjacency, `total` reflecting the FTS predicate, and sqlite-vs-pg
+  equivalence over the shared corpus.
+
 ## 0.2.89
 
 Harden public npm package contents so internal docs never ship. The published
