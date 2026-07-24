@@ -45,9 +45,14 @@ function readPackedFiles() {
     cwd: repoRoot,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
+    // On Windows the npm launcher is npm.cmd, which spawnSync only resolves via a shell.
+    shell: process.platform === 'win32',
   });
+  if (result.error) {
+    throw new Error(`npm pack --dry-run could not be spawned:\n${result.error.message}`);
+  }
   if (result.status !== 0) {
-    throw new Error(`npm pack --dry-run failed:\n${result.stderr || result.stdout}`);
+    throw new Error(`npm pack --dry-run failed:\n${result.stderr || result.stdout || `exit code ${result.status}`}`);
   }
   const packs = JSON.parse(result.stdout);
   if (!Array.isArray(packs) || !packs[0]?.files) {
