@@ -43,6 +43,29 @@ const forbiddenPackagePaths = [
 ].sort();
 
 describe('public package release safety', () => {
+  // Node's builtin list, hardcoded on purpose. `builtinModules` under `bun test` returns BUN's
+  // list, which includes `ws`, `undici` and `bun` - real npm package names that are NOT Node
+  // builtins, so using it would bless imports that throw for every node installer.
+  const NODE_BUILTINS = new Set([
+    'assert', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+    'crypto', 'dgram', 'diagnostics_channel', 'dns', 'domain', 'events', 'fs', 'http', 'http2',
+    'https', 'inspector', 'module', 'net', 'os', 'path', 'perf_hooks', 'process', 'punycode',
+    'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'timers', 'tls', 'trace_events',
+    'tty', 'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
+  ]);
+
+  /** Does the published package ship this repo-relative path? */
+  const isShippedPath = (repoRelativePath: string): boolean => {
+    // npm always includes package.json regardless of `files`, and a version string read from
+    // it is an ordinary thing for a published script to do.
+    if (repoRelativePath === 'package.json') return true;
+    const shipped = (packageJson as unknown as { files?: string[] }).files ?? [];
+    return shipped.some((entry) => {
+      const normalized = entry.replace(/\/+$/, '');
+      return repoRelativePath === normalized || repoRelativePath.startsWith(`${normalized}/`);
+    });
+  };
+
   // Pre-existing breakage, each verified against a packed tarball and tracked in todos.
   // Every entry must be removed by its task; removing one and not the others leaves the
   // published script still throwing, so they are listed individually.
@@ -86,6 +109,12 @@ describe('public package release safety', () => {
    * that were supposed to pin them exercised a private copy of the logic instead of the logic
    * itself. Silent-green was the defect; moving the implementation never fixed it.
    *
+   * Scope limit, stated rather than implied by the name: the transpiler reports `import`,
+   * `import()` and `export … from`. It does NOT report `require()`, `import.meta.resolve()`,
+   * or `new URL('./x', import.meta.url)`. No published script uses those today, and the last
+   * is the plausible one to appear, since it is how you reference a sibling that must be in
+   * `files`. A file the transpiler cannot parse throws, so that path is loud, not silent.
+   *
    * Imports are extracted with the real transpiler, NOT by stripping comments and matching a
    * regex. Two hand-written strippers were tried and both had the same defect: a `/*` inside
    * an ordinary string opened a phantom comment and silently deleted real imports. The second
@@ -114,7 +143,26 @@ describe('public package release safety', () => {
      *  - `bun:` builtins. They resolve under Bun and throw ERR_UNSUPPORTED_ESM_URL_SCHEME
      *    under node, so they are exempted by name below, never blessed as a class.
      */
-    const isAlwaysResolvable = (specifier: string): boolean => specifier.startsWith('node:');
+    // `node:`-prefixed builtins, unprefixed NODE builtins, and self-reference through the
+    // package's own `exports` map all resolve from a real install - each verified against an
+    // extracted tarball under node, not assumed. Deleting these outright was a false positive:
+    // `import { sep } from 'path'` and `@hasna/knowledge/storage` both resolve.
+    //
+    // Still NOT allowed, also verified: `@hasna/knowledge/<undeclared>`
+    // (ERR_PACKAGE_PATH_NOT_EXPORTED), `#`-prefixed (ERR_PACKAGE_IMPORT_NOT_DEFINED, no
+    // `imports` map), and `ws`/`undici`/`bun` (ERR_MODULE_NOT_FOUND - they are in BUN's
+    // builtinModules, not Node's, which is why NODE_BUILTINS is hardcoded).
+    const exportsMap = (packageJson as unknown as { exports?: Record<string, unknown> }).exports ?? {};
+    const ownName = (packageJson as unknown as { name?: string }).name ?? '';
+    const exportedSubpaths = new Set(
+      Object.keys(exportsMap).map((key) => (key === '.' ? ownName : `${ownName}/${key.replace(/^\.\//, '')}`)),
+    );
+
+    const isAlwaysResolvable = (specifier: string): boolean => {
+      if (specifier.startsWith('node:')) return true;
+      if (NODE_BUILTINS.has(specifier)) return true;
+      return ownName !== '' && exportedSubpaths.has(specifier);
+    };
 
     const unresolvable: string[] = [];
     for (const { path: specifier } of transpiler.scan(source).imports) {
@@ -123,7 +171,10 @@ describe('public package release safety', () => {
 
       if (specifier.startsWith('.')) {
         const resolved = posix.normalize(posix.join(posix.dirname(script), specifier));
-        if (!publicScripts.includes(resolved)) unresolvable.push(specifier);
+        // Checked against everything the package SHIPS, not just the scripts allowlist:
+        // `../package.json` and `../dist/index.js` are published and resolve from a real
+        // install, and both were reported as breakage by the scripts-only check.
+        if (!isShippedPath(resolved)) unresolvable.push(specifier);
         continue;
       }
 
@@ -173,8 +224,18 @@ describe('public package release safety', () => {
     expect(check(`import { Database } from 'bun:sqlite';`)).toContain('bun:sqlite');
 
     // ...and legitimate code is not reported, or the check false-positives and gets widened.
+    // Every entry below was verified to RESOLVE from an extracted tarball under node.
     expect(check(`import { readFileSync } from 'node:fs';`)).toEqual([]);
     expect(check(`import { z } from 'zod';`)).toEqual([]);
+    // Unprefixed Node builtins resolve; nothing in this repo forces the node: prefix.
+    expect(check(`import { sep } from 'path';`)).toEqual([]);
+    expect(check(`import { readFileSync as r } from 'fs';`)).toEqual([]);
+    expect(check(`import { spawnSync } from 'child_process';`)).toEqual([]);
+    // Self-reference resolves for subpaths the exports map declares - and only those.
+    expect(check(`import x from '@hasna/knowledge';`)).toEqual([]);
+    expect(check(`import x from '@hasna/knowledge/storage';`)).toEqual([]);
+    // Shipped non-script files are published and resolve.
+    expect(check(`import pkg from '../package.json' with { type: 'json' };`)).toEqual([]);
     expect(check(`// import dead from 'ghost-e';`)).toEqual([]);
     expect(check(`/* import dead from 'ghost-f'; */`)).toEqual([]);
     expect(check(`const s = "import x from 'ghost-g'";`)).toEqual([]);
@@ -198,13 +259,15 @@ describe('public package release safety', () => {
     const deps = (packageJson as unknown as { dependencies?: Record<string, string> }).dependencies ?? {};
     expect(Object.keys(deps)).not.toContain('@hasna/contracts');
 
-    // Removing an exemption must make the check report it again.
-    for (const [script, specifier] of [
-      ['scripts/apply-cloud-migrations.mjs', '../src/storage.ts'],
-      ['scripts/apply-cloud-migrations.mjs', '@hasna/contracts/auth'],
-      ['scripts/smoke-open-files-installed-boundary.mjs', 'bun:sqlite'],
-    ] as const) {
-      const key = `${script} -> ${specifier}`;
+    // Derived from the Set, never restated. A hardcoded copy meant ADDING an exemption was
+    // pinned by nothing: a genuinely broken import plus a matching entry left the file green.
+    expect(knownUnresolvedImports.size).toBeGreaterThan(0);
+    for (const key of [...knownUnresolvedImports]) {
+      const separator = key.indexOf(' -> ');
+      const script = key.slice(0, separator);
+      const specifier = key.slice(separator + 4);
+      // Every exemption must name a script that is actually published...
+      expect(publicScripts, `exemption names an unpublished script: ${key}`).toContain(script);
       knownUnresolvedImports.delete(key);
       try {
         expect(unresolvableImportsIn(script, readFileSync(join(repoRoot, script), 'utf8')))

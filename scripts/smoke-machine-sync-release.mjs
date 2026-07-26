@@ -127,9 +127,14 @@ function runRemote(remote, command, options = {}) {
  * Report a cleanup problem without ever throwing.
  *
  * Used only from `finally` blocks, where a throw REPLACES the in-flight exception from the
- * try block and skips the remaining cleanup. `process.stderr.write` is synchronous on a pipe,
- * so it throws EPIPE when the consumer has exited - which is why the reporter itself has to
- * be contained, not just the statements it reports on.
+ * try block and skips the remaining cleanup, so the reporter itself is contained rather than
+ * only the statements it reports on.
+ *
+ * The try/catch covers a synchronous throw (a non-string argument, a closed fd). It does NOT
+ * cover EPIPE: measured on Linux, writing to a stderr pipe whose reader has exited raises an
+ * asynchronous 'error' event that terminates the process, and no catch here can intercept
+ * that. An earlier version of this comment claimed otherwise; the residual risk of the
+ * process dying mid-cleanup is real and is not addressed by this function.
  */
 function reportCleanupProblem(what, error) {
   try {
@@ -864,4 +869,20 @@ function main() {
   outputSummary(summary, options);
 }
 
-main();
+/**
+ * Run only when invoked directly, never on import.
+ *
+ * `main()` at module scope means merely importing this file performs `bun install -g` locally
+ * AND `ssh <remote> bun install -g` on a fleet host, before any argument is inspected. That is
+ * not hypothetical: it fired during review of this very PR, when the file was imported to test
+ * import resolution, and it installed a package on the reviewer's machine and attempted a
+ * remote install. A published script must not mutate a machine as a side effect of being
+ * loaded. Compared against argv rather than `import.meta.main`, which Node did not support
+ * until v24 and which would silently turn this script into a no-op there.
+ */
+const invokedDirectly = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  main();
+}
