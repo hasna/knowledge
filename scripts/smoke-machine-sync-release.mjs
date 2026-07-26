@@ -5,6 +5,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertRemoteTempDir } from './lib/remote-temp-dir.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
@@ -120,6 +121,11 @@ function runShell(command, options = {}) {
 
 function runRemote(remote, command, options = {}) {
   return runChecked('ssh', [remote, command], options);
+}
+
+function createRemoteTempDir(remote, template) {
+  const dir = runRemote(remote, `mktemp -d ${shellQuote(template)}`).trim();
+  return assertRemoteTempDir(remote, dir, template);
 }
 
 function parseJsonOutput(label, raw) {
@@ -411,7 +417,8 @@ function syncMachineArgs(options, remoteDir, runOptions = {}) {
 
 function runSyncSmoke(options, runOptions = {}) {
   const localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
-  const remoteDir = runRemote(options.remote, `mktemp -d ${shellQuote(`/tmp/knowledge-linux-node-a-${options.knowledgeVersion}-XXXXXX`)}`).trim();
+  const remoteTemplate = `/tmp/knowledge-linux-node-a-${options.knowledgeVersion}-XXXXXX`;
+  const remoteDir = createRemoteTempDir(options.remote, remoteTemplate);
   const localCommandOptions = runOptions.localCommandOptions ?? {};
   const learnCommandOptions = runOptions.learnCommandOptions ?? {};
   try {
@@ -576,6 +583,9 @@ function runSyncSmoke(options, runOptions = {}) {
   } finally {
     if (!options.keepTemp) {
       rmSync(localDir, { recursive: true, force: true });
+      // Re-assert immediately before the delete: the value must still be the temp dir this
+      // run created, whatever happened in between.
+      assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
       run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
     }
   }

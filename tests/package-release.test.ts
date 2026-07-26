@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,6 +27,9 @@ const publicDocs = [
 
 const publicScripts = [
   'scripts/apply-cloud-migrations.mjs',
+  // Imported by scripts/smoke-machine-sync-release.mjs, so it must ship with it or the
+  // published script fails to resolve at runtime.
+  'scripts/lib/remote-temp-dir.mjs',
   'scripts/smoke-machine-sync-release.mjs',
   'scripts/smoke-machines-adapter.mjs',
   'scripts/smoke-open-files-installed-boundary.mjs',
@@ -58,6 +61,33 @@ describe('public package release safety', () => {
 
     for (const path of forbiddenPackagePaths) {
       expect(packageJson.files).not.toContain(path);
+    }
+  });
+
+  /**
+   * A published script that imports a file left out of `files` resolves fine in the repo and
+   * throws ERR_MODULE_NOT_FOUND for everyone who installs the package. The allowlists above
+   * only catch the opposite mistake (shipping something unreviewed), so this closes the gap.
+   */
+  test('every relative import in a published script is itself published', () => {
+    const importPattern = /(?:from\s*|\bimport\s*\(\s*)['"](\.[^'"]+)['"]/g;
+
+    // Pre-existing breakage, tracked as todos task 1eb481d5: this script imports
+    // ../src/storage.ts but src/ has never been in `files`, so the published copy already
+    // fails with ERR_MODULE_NOT_FOUND. Exempted by name rather than by weakening the rule,
+    // and removing this entry is that task's acceptance criterion.
+    const knownUnresolvedImports = new Set([
+      'scripts/apply-cloud-migrations.mjs -> ../src/storage.ts',
+    ]);
+
+    for (const script of publicScripts) {
+      const source = readFileSync(join(repoRoot, script), 'utf8');
+      for (const [, specifier] of source.matchAll(importPattern)) {
+        if (knownUnresolvedImports.has(`${script} -> ${specifier}`)) continue;
+        const resolved = posix.normalize(posix.join(posix.dirname(script), specifier));
+        expect(publicScripts, `${script} imports ${specifier}, which is not in the published files list`)
+          .toContain(resolved);
+      }
     }
   });
 
