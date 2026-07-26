@@ -123,6 +123,32 @@ function runRemote(remote, command, options = {}) {
   return runChecked('ssh', [remote, command], options);
 }
 
+/**
+ * Report a cleanup problem without ever throwing.
+ *
+ * Used only from `finally` blocks, where a throw REPLACES the in-flight exception from the
+ * try block and skips the remaining cleanup. `process.stderr.write` is synchronous on a pipe,
+ * so it throws EPIPE when the consumer has exited - which is why the reporter itself has to
+ * be contained, not just the statements it reports on.
+ */
+function reportCleanupProblem(what, error) {
+  try {
+    process.stderr.write(`[smoke] ${what}: ${error instanceof Error ? error.message : String(error)}\n`);
+  } catch {
+    // Nothing can be done about a failed diagnostic, and it must not mask the real error.
+  }
+}
+
+/** Remove a directory from a `finally` block without ever throwing. */
+function removeTempDirSafely(dir, label) {
+  if (dir === null || dir === undefined) return;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (error) {
+    reportCleanupProblem(`could not remove ${label} ${dir}`, error);
+  }
+}
+
 function createRemoteTempDir(remote, template) {
   const dir = runRemote(remote, `mktemp -d ${shellQuote(template)}`).trim();
   return assertRemoteTempDir(remote, dir, template);
@@ -588,22 +614,11 @@ function runSyncSmoke(options, runOptions = {}) {
     return summary;
   } finally {
     if (!options.keepTemp) {
-      // EVERY statement in this finally is individually contained. A throw here would replace
-      // the in-flight exception from the try block - turning a real smoke failure into a
-      // confusing cleanup error - and would skip the remaining cleanup. Containing only the
-      // one statement that "cannot currently fail" while leaving the two that can is not
-      // containment.
-      const report = (what, error) => process.stderr.write(
-        `[smoke] ${what}: ${error instanceof Error ? error.message : String(error)}\n`
-      );
+      // EVERY statement in this finally is individually contained, including `report` itself.
+      // A throw here would replace the in-flight exception from the try block - turning a real
+      // smoke failure into a confusing cleanup error - and would skip the remaining cleanup.
 
-      if (localDir !== null) {
-        try {
-          rmSync(localDir, { recursive: true, force: true });
-        } catch (error) {
-          report(`could not remove local temp dir ${localDir}`, error);
-        }
-      }
+      removeTempDirSafely(localDir, 'local temp dir');
 
       if (remoteDir !== null) {
         // Re-check before the delete. remoteDir is assigned once from a validated value, so
@@ -614,7 +629,7 @@ function runSyncSmoke(options, runOptions = {}) {
           assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
         } catch (error) {
           remoteDirStillValid = false;
-          report('refusing remote cleanup, temp dir no longer validates', error);
+          reportCleanupProblem('refusing remote cleanup, temp dir no longer validates', error);
         }
 
         if (remoteDirStillValid) {
@@ -623,13 +638,13 @@ function runSyncSmoke(options, runOptions = {}) {
             // status, so it is surfaced here rather than discarded.
             const cleanup = run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
             if (cleanup.status !== 0) {
-              report(
+              reportCleanupProblem(
                 `remote cleanup of ${remoteDir} on ${options.remote} exited ${cleanup.status}; it may still exist`,
                 cleanup.stderr.trim() || 'no stderr'
               );
             }
           } catch (error) {
-            report(`remote cleanup of ${remoteDir} could not be spawned`, error);
+            reportCleanupProblem(`remote cleanup of ${remoteDir} could not be spawned`, error);
           }
         }
       }
@@ -645,7 +660,7 @@ function runNoMachinesSyncSmoke(options, dirs) {
     try {
       probe = knowledgeJson(probeDir, ['machines', 'topology', '--no-tailscale', '--json'], { env: runner.env });
     } finally {
-      if (!options.keepTemp) rmSync(probeDir, { recursive: true, force: true });
+      if (!options.keepTemp) removeTempDirSafely(probeDir, 'probe dir');
     }
     if (probe.adapter?.implementation !== 'disabled' || probe.adapter?.available !== false) {
       throw new Error(`no-machines probe did not disable adapter: ${JSON.stringify(probe.adapter)}`);
@@ -675,7 +690,7 @@ function runNoMachinesSyncSmoke(options, dirs) {
       sync,
     };
   } finally {
-    if (!options.keepTemp) rmSync(runner.app_dir, { recursive: true, force: true });
+    if (!options.keepTemp) removeTempDirSafely(runner.app_dir, 'runner app dir');
   }
 }
 
@@ -687,7 +702,7 @@ function runNoMachinesRegistrySyncSmoke(options, dirs) {
     try {
       probe = knowledgeJson(probeDir, ['machines', 'topology', '--no-tailscale', '--json'], { env: runner.env });
     } finally {
-      if (!options.keepTemp) rmSync(probeDir, { recursive: true, force: true });
+      if (!options.keepTemp) removeTempDirSafely(probeDir, 'probe dir');
     }
     if (probe.adapter?.implementation !== 'disabled' || probe.adapter?.available !== false) {
       throw new Error(`no-machines registry probe did not disable adapter: ${JSON.stringify(probe.adapter)}`);
@@ -730,7 +745,7 @@ function runNoMachinesRegistrySyncSmoke(options, dirs) {
       sync,
     };
   } finally {
-    if (!options.keepTemp) rmSync(runner.app_dir, { recursive: true, force: true });
+    if (!options.keepTemp) removeTempDirSafely(runner.app_dir, 'runner app dir');
   }
 }
 

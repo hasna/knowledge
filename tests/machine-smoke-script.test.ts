@@ -245,6 +245,28 @@ describe('remote temp dir guard', () => {
     )).toThrow(/descends below the directory the template would create/);
   });
 
+  test('rejects a lone carriage return, not just a newline', () => {
+    // The multi-line check is /[\r\n]/; a fixture using only \n would let it be narrowed to
+    // /\n/ unnoticed.
+    expect(() => assertRemoteTempDir(
+      remote,
+      '/tmp/knowledge-linux-node-a-0.0.0-test-Ab3De9\rjunk',
+      template,
+    )).toThrow(/multiple lines/);
+  });
+
+  test('rejects shell metacharacters and separators in the suffix by charset, not by length', () => {
+    // Each of these is exactly 6 characters, so only the charset rule can reject them. The
+    // earlier fixtures were all the wrong length, leaving the charset check - the
+    // shell-metacharacter backstop - pinned by nothing.
+    const base = '/tmp/knowledge-linux-node-a-0.0.0-test-';
+    for (const suffix of ['Ab3De.', 'Ab3De-', 'Ab3De_', 'Ab3De$', 'Ab3De;', 'Ab3De*', 'Ab3De ']) {
+      expect(() => assertRemoteTempDir(remote, `${base}${suffix}`, template))
+        .toThrow(/characters mktemp never generates/);
+    }
+    expect(assertRemoteTempDir(remote, `${base}Ab3De9`, template)).toBe(`${base}Ab3De9`);
+  });
+
   test('requires at least three X, the POSIX minimum the template rule cites', () => {
     // Pins the documented boundary: without this, X{3,} could be relaxed to X{1,} unnoticed.
     expect(() => assertRemoteTempDir(remote, '/tmp/k-A', '/tmp/k-X')).toThrow(/at least three X/);
