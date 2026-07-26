@@ -106,8 +106,17 @@ describe('installed open-files boundary smoke script', () => {
 
 /**
  * `runSyncSmoke` sends `rm -rf <remoteDir>` over ssh, where remoteDir came from a remote
- * `mktemp -d`. Consuming that output unchecked is the same class of defect as the 2026-07-24
- * incident, where an empty `$(bun pm cache)` turned `rm -rf "$(cmd)"/*` into `rm -rf /*`.
+ * `mktemp -d`. Taking a delete target on faith from a command's output is the same class of
+ * defect as the 2026-07-24 incident, where an empty `$(bun pm cache)` turned
+ * `rm -rf "$(cmd)"/*` into `rm -rf /*`.
+ *
+ * Precisely which case is live: `runRemote` goes through `runChecked`, which throws on a
+ * non-zero remote exit, so a *failing* `mktemp -d` (exit 1) aborts the run and never assigns
+ * an empty string. The reachable hole is the remote exiting **zero** with stdout that is not
+ * the path - an ssh `Banner`, a chatty login profile, or a `ForceCommand` wrapper prepending
+ * lines or masking the status. Verified: `echo banner; mktemp -d ...` exits 0 and yields
+ * `"Welcome to linux-node-a\n/tmp/knowledge-banner-XXXXXX"`, which the guard rejects.
+ *
  * These cases prove the guard rejects bad input rather than merely accepting good input.
  * No `rm` runs here: only the validator is exercised.
  */
@@ -121,8 +130,9 @@ describe('remote temp dir guard', () => {
   });
 
   test('rejects the empty output a failing mktemp -d leaves behind', () => {
-    // This is the live defect: `mktemp -d` prints its error on stderr and nothing on stdout,
-    // so the unchecked assignment yielded '' and the cleanup ran `rm -rf ''`.
+    // Defence in depth rather than the live defect: runChecked aborts on a non-zero remote
+    // exit, so an empty value cannot reach here via a failing mktemp. It can via a wrapper
+    // that exits 0 without printing a path.
     expect(() => assertRemoteTempDir(remote, '', template)).toThrow(/produced no path/);
     expect(() => assertRemoteTempDir(remote, '   '.trim(), template)).toThrow(/produced no path/);
   });
@@ -167,5 +177,39 @@ describe('remote temp dir guard', () => {
       .toThrow(/must be an absolute path/);
     expect(() => assertRemoteTempDir(remote, '/tmp/x', '/tmp/no-placeholder'))
       .toThrow(/must end in at least three X/);
+  });
+
+  /**
+   * Regression for the review finding that this guard silently degraded into the
+   * parent-directory-only check it exists to avoid. With a template like `/tmp/XXXXXX` the
+   * derived prefix is a bare directory, so every sibling under it validated:
+   * `/tmp/XXXXXX` accepted `/tmp/somebody-elses-dir`, and `/XXXXXX` accepted `/etc`.
+   */
+  test('refuses a template whose final component is only X, which would accept any sibling', () => {
+    for (const badTemplate of ['/tmp/XXXXXX', '/XXXXXX', '/home/hasna/XXXXXXXX']) {
+      expect(() => assertRemoteTempDir(remote, '/tmp/anything', badTemplate))
+        .toThrow(/must have a fixed prefix in its final component/);
+    }
+  });
+
+  test('refuses a template containing . or .., which makes the derived bound meaningless', () => {
+    // The template is built from a caller-supplied version string.
+    expect(() => assertRemoteTempDir(
+      remote,
+      '/tmp/knowledge-x/../../../home/hasna-AbCdEf',
+      '/tmp/knowledge-x/../../../home/hasna-XXXXXX',
+    )).toThrow(/must be normalized/);
+    expect(() => assertRemoteTempDir(remote, '/tmp/k-AbCdEf', '/tmp/./k-XXXXXX'))
+      .toThrow(/must be normalized/);
+  });
+
+  test('rejects the bare template prefix, which means mktemp created nothing', () => {
+    expect(() => assertRemoteTempDir(remote, '/tmp/knowledge-linux-node-a-0.0.0-test-', template))
+      .toThrow(/mktemp created nothing/);
+  });
+
+  test('rejects a relative path even though the template bound implies absoluteness', () => {
+    expect(() => assertRemoteTempDir(remote, 'tmp/knowledge-linux-node-a-0.0.0-test-Ab3De9', template))
+      .toThrow(/not absolute/);
   });
 });

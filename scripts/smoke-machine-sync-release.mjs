@@ -416,9 +416,11 @@ function syncMachineArgs(options, remoteDir, runOptions = {}) {
 }
 
 function runSyncSmoke(options, runOptions = {}) {
-  const localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
+  // The remote dir is created first because it is the step that can reject: doing it before
+  // mkdtempSync means a refused temp dir cannot leak a local one.
   const remoteTemplate = `/tmp/knowledge-linux-node-a-${options.knowledgeVersion}-XXXXXX`;
   const remoteDir = createRemoteTempDir(options.remote, remoteTemplate);
+  const localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
   const localCommandOptions = runOptions.localCommandOptions ?? {};
   const learnCommandOptions = runOptions.learnCommandOptions ?? {};
   try {
@@ -583,10 +585,23 @@ function runSyncSmoke(options, runOptions = {}) {
   } finally {
     if (!options.keepTemp) {
       rmSync(localDir, { recursive: true, force: true });
-      // Re-assert immediately before the delete: the value must still be the temp dir this
-      // run created, whatever happened in between.
-      assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
-      run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
+      // Belt-and-braces re-check before the delete. `remoteDir`/`remoteTemplate` are const and
+      // the validator is pure, so this cannot currently fail - it exists so a future refactor
+      // that makes the value reassignable is caught here rather than at the `rm -rf`.
+      // A throw inside `finally` would REPLACE any in-flight exception from the try block and
+      // skip the cleanup below, so it is contained: report and skip the delete, never mask.
+      let remoteDirStillValid = true;
+      try {
+        assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
+      } catch (error) {
+        remoteDirStillValid = false;
+        process.stderr.write(
+          `[smoke] refusing remote cleanup, temp dir no longer validates: ${error instanceof Error ? error.message : String(error)}\n`
+        );
+      }
+      if (remoteDirStillValid) {
+        run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
+      }
     }
   }
 }

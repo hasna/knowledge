@@ -65,28 +65,61 @@ describe('public package release safety', () => {
   });
 
   /**
-   * A published script that imports a file left out of `files` resolves fine in the repo and
-   * throws ERR_MODULE_NOT_FOUND for everyone who installs the package. The allowlists above
+   * A published script that imports something the package does not ship resolves fine in the
+   * repo and throws ERR_MODULE_NOT_FOUND for everyone who installs it. The allowlists above
    * only catch the opposite mistake (shipping something unreviewed), so this closes the gap.
+   *
+   * Both directions are checked, because a published script can fail to resolve two ways:
+   * a relative import of a file outside `files`, or a bare import of a package that is not a
+   * runtime dependency. Checking only relative imports would let this test go green while the
+   * packed script is still broken.
    */
-  test('every relative import in a published script is itself published', () => {
-    const importPattern = /(?:from\s*|\bimport\s*\(\s*)['"](\.[^'"]+)['"]/g;
+  test('every import in a published script resolves from the published package', () => {
+    // Strip comments and template literals first: a commented-out import must not fail the
+    // test, and a dynamic import with an interpolated path cannot be resolved statically.
+    const strip = (source: string) => source
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
 
-    // Pre-existing breakage, tracked as todos task 1eb481d5: this script imports
-    // ../src/storage.ts but src/ has never been in `files`, so the published copy already
-    // fails with ERR_MODULE_NOT_FOUND. Exempted by name rather than by weakening the rule,
-    // and removing this entry is that task's acceptance criterion.
+    // `from '...'`, bare `import '...'` (side-effect), and `import('...')`.
+    const specifierPattern =
+      /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+(?=['"]))['"]([^'"]+)['"]/g;
+
+    const runtimeDeps = new Set(Object.keys(
+      (packageJson as unknown as { dependencies?: Record<string, string> }).dependencies ?? {},
+    ));
+
+    // Pre-existing breakage, tracked as todos task 1eb481d5. This script has TWO unresolvable
+    // imports, not one: `../src/storage.ts` (src/ is not in `files`) and `@hasna/contracts/auth`
+    // (a devDependency only). Both are exempted by name so the rule is not weakened, and
+    // BOTH must be removed for that task to be genuinely done -- deleting only the first
+    // would leave the published script still throwing.
     const knownUnresolvedImports = new Set([
       'scripts/apply-cloud-migrations.mjs -> ../src/storage.ts',
+      'scripts/apply-cloud-migrations.mjs -> @hasna/contracts/auth',
     ]);
 
     for (const script of publicScripts) {
-      const source = readFileSync(join(repoRoot, script), 'utf8');
-      for (const [, specifier] of source.matchAll(importPattern)) {
+      const source = strip(readFileSync(join(repoRoot, script), 'utf8'));
+      for (const [, specifier] of source.matchAll(specifierPattern)) {
         if (knownUnresolvedImports.has(`${script} -> ${specifier}`)) continue;
-        const resolved = posix.normalize(posix.join(posix.dirname(script), specifier));
-        expect(publicScripts, `${script} imports ${specifier}, which is not in the published files list`)
-          .toContain(resolved);
+        // Runtime builtins ship with the runtime, not with the package.
+        if (specifier.startsWith('node:') || specifier.startsWith('bun:')) continue;
+
+        if (specifier.startsWith('.')) {
+          const resolved = posix.normalize(posix.join(posix.dirname(script), specifier));
+          expect(publicScripts, `${script} imports ${specifier}, which is not in the published files list`)
+            .toContain(resolved);
+          continue;
+        }
+
+        // Bare specifier: must be a runtime dependency, not a devDependency.
+        const pkg = specifier.startsWith('@')
+          ? specifier.split('/').slice(0, 2).join('/')
+          : specifier.split('/')[0];
+        expect(runtimeDeps, `${script} imports ${specifier}, which is not a runtime dependency`)
+          .toContain(pkg);
       }
     }
   });
