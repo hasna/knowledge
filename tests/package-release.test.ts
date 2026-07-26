@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
+import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -75,12 +76,46 @@ describe('public package release safety', () => {
    * packed script is still broken.
    */
   test('every import in a published script resolves from the published package', () => {
-    // Strip comments and template literals first: a commented-out import must not fail the
-    // test, and a dynamic import with an interpolated path cannot be resolved statically.
-    const strip = (source: string) => source
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+    // Comments must be removed with a scanner, not a regex. `/\*[\s\S]*?\*/` treats the `/*`
+    // inside a string literal such as '**/*.ts' as a comment opener and deletes everything up
+    // to the next `*/`, silently swallowing any import in between -- a guard-rail test that
+    // goes green while the published script is broken, which is the exact failure this test
+    // exists to catch.
+    const stripComments = (source: string): string => {
+      let out = "";
+      let i = 0;
+      while (i < source.length) {
+        const ch = source[i];
+        const next = source[i + 1];
+
+        if (ch === "/" && next === "/") {
+          while (i < source.length && source[i] !== "\n") i += 1;
+          continue;
+        }
+        if (ch === "/" && next === "*") {
+          i += 2;
+          while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+          i += 2;
+          out += " ";
+          continue;
+        }
+        if (ch === "'" || ch === '"' || ch === "`") {
+          const quote = ch;
+          out += ch;
+          i += 1;
+          while (i < source.length) {
+            if (source[i] === "\\") { out += source.slice(i, i + 2); i += 2; continue; }
+            out += source[i];
+            if (source[i] === quote) { i += 1; break; }
+            i += 1;
+          }
+          continue;
+        }
+        out += ch;
+        i += 1;
+      }
+      return out;
+    };
 
     // `from '...'`, bare `import '...'` (side-effect), and `import('...')`.
     const specifierPattern =
@@ -89,6 +124,16 @@ describe('public package release safety', () => {
     const runtimeDeps = new Set(Object.keys(
       (packageJson as unknown as { dependencies?: Record<string, string> }).dependencies ?? {},
     ));
+    // A published script may also import Node/Bun builtins without the `node:` prefix, its own
+    // package (valid via the `exports` map), and `#`-prefixed `imports` subpaths.
+    const ownName = (packageJson as unknown as { name?: string }).name ?? "";
+    const isAlwaysResolvable = (specifier: string): boolean =>
+      specifier.startsWith("node:")
+      || specifier.startsWith("bun:")
+      || specifier.startsWith("#")
+      || builtinModules.includes(specifier)
+      || specifier === ownName
+      || specifier.startsWith(`${ownName}/`);
 
     // Pre-existing breakage, tracked as todos task 1eb481d5. This script has TWO unresolvable
     // imports, not one: `../src/storage.ts` (src/ is not in `files`) and `@hasna/contracts/auth`
@@ -101,11 +146,10 @@ describe('public package release safety', () => {
     ]);
 
     for (const script of publicScripts) {
-      const source = strip(readFileSync(join(repoRoot, script), 'utf8'));
+      const source = stripComments(readFileSync(join(repoRoot, script), 'utf8'));
       for (const [, specifier] of source.matchAll(specifierPattern)) {
         if (knownUnresolvedImports.has(`${script} -> ${specifier}`)) continue;
-        // Runtime builtins ship with the runtime, not with the package.
-        if (specifier.startsWith('node:') || specifier.startsWith('bun:')) continue;
+        if (isAlwaysResolvable(specifier)) continue;
 
         if (specifier.startsWith('.')) {
           const resolved = posix.normalize(posix.join(posix.dirname(script), specifier));

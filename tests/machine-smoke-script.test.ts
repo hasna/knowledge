@@ -114,8 +114,13 @@ describe('installed open-files boundary smoke script', () => {
  * non-zero remote exit, so a *failing* `mktemp -d` (exit 1) aborts the run and never assigns
  * an empty string. The reachable hole is the remote exiting **zero** with stdout that is not
  * the path - an ssh `Banner`, a chatty login profile, or a `ForceCommand` wrapper prepending
- * lines or masking the status. Verified: `echo banner; mktemp -d ...` exits 0 and yields
- * `"Welcome to linux-node-a\n/tmp/knowledge-banner-XXXXXX"`, which the guard rejects.
+ * lines or masking the status. Measured verbatim:
+ *
+ *     $ echo "Welcome to linux-node-a"; mktemp -d /tmp/knowledge-banner-XXXXXX
+ *     Welcome to linux-node-a
+ *     /tmp/knowledge-banner-jjuN3k
+ *
+ * exit 0, so `runChecked` passes it through; the guard rejects it as multi-line.
  *
  * These cases prove the guard rejects bad input rather than merely accepting good input.
  * No `rm` runs here: only the validator is exercised.
@@ -148,7 +153,8 @@ describe('remote temp dir guard', () => {
       './relative',
       '/tmp/knowledge-linux-node-a-0.0.0-test-Ab3De9/../../etc',
     ]) {
-      expect(() => assertRemoteTempDir(remote, bad, template)).toThrow();
+      expect(() => assertRemoteTempDir(remote, bad, template))
+        .toThrow(/Refusing to use remote temp dir/);
     }
   });
 
@@ -206,6 +212,44 @@ describe('remote temp dir guard', () => {
   test('rejects the bare template prefix, which means mktemp created nothing', () => {
     expect(() => assertRemoteTempDir(remote, '/tmp/knowledge-linux-node-a-0.0.0-test-', template))
       .toThrow(/mktemp created nothing/);
+  });
+
+  test('rejects the banner-first shape the docstring calls the live case', () => {
+    // Documented as the reachable hole but previously untested: only path-then-junk was
+    // covered, never junk-then-path.
+    expect(() => assertRemoteTempDir(
+      remote,
+      'Welcome to linux-node-a\n/tmp/knowledge-linux-node-a-0.0.0-test-Ab3De9',
+      template,
+    )).toThrow(/multiple lines/);
+  });
+
+  test('rejects a suffix mktemp could not have generated', () => {
+    const base = '/tmp/knowledge-linux-node-a-0.0.0-test-';
+    // mktemp replaces the X run with exactly that many [A-Za-z0-9] characters.
+    expect(() => assertRemoteTempDir(remote, `${base}Z`, template)).toThrow(/X run is 6/);
+    expect(() => assertRemoteTempDir(remote, `${base}ZZZZZZZZZZ`, template)).toThrow(/X run is 6/);
+    expect(() => assertRemoteTempDir(remote, `${base}A B123`, template))
+      .toThrow(/characters mktemp never generates/);
+    expect(() => assertRemoteTempDir(remote, `${base}$(id)`, template)).toThrow();
+    expect(assertRemoteTempDir(remote, `${base}Ab3De9`, template)).toBe(`${base}Ab3De9`);
+  });
+
+  test('a suffix containing a separator reports descent, not a charset complaint', () => {
+    // The charset rule below would also reject this, but the descent message is the useful
+    // one. Asserting the message pins the ordering so the clearer diagnostic cannot be lost.
+    expect(() => assertRemoteTempDir(
+      remote,
+      '/tmp/knowledge-linux-node-a-0.0.0-test-Ab3De9/nested',
+      template,
+    )).toThrow(/descends below the directory the template would create/);
+  });
+
+  test('requires at least three X, the POSIX minimum the template rule cites', () => {
+    // Pins the documented boundary: without this, X{3,} could be relaxed to X{1,} unnoticed.
+    expect(() => assertRemoteTempDir(remote, '/tmp/k-A', '/tmp/k-X')).toThrow(/at least three X/);
+    expect(() => assertRemoteTempDir(remote, '/tmp/k-AB', '/tmp/k-XX')).toThrow(/at least three X/);
+    expect(assertRemoteTempDir(remote, '/tmp/k-ABC', '/tmp/k-XXX')).toBe('/tmp/k-ABC');
   });
 
   test('rejects a relative path even though the template bound implies absoluteness', () => {

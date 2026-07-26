@@ -416,14 +416,18 @@ function syncMachineArgs(options, remoteDir, runOptions = {}) {
 }
 
 function runSyncSmoke(options, runOptions = {}) {
-  // The remote dir is created first because it is the step that can reject: doing it before
-  // mkdtempSync means a refused temp dir cannot leak a local one.
+  // Both temp dirs are created INSIDE the try, with the finally null-guarding each one, so
+  // whichever creation succeeds is always cleaned up. Creating either one outside only moves
+  // the leak around: remote-first leaks a remote dir when mkdtempSync fails, local-first
+  // leaks a local dir when the remote dir is refused.
   const remoteTemplate = `/tmp/knowledge-linux-node-a-${options.knowledgeVersion}-XXXXXX`;
-  const remoteDir = createRemoteTempDir(options.remote, remoteTemplate);
-  const localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
+  let remoteDir = null;
+  let localDir = null;
   const localCommandOptions = runOptions.localCommandOptions ?? {};
   const learnCommandOptions = runOptions.learnCommandOptions ?? {};
   try {
+    remoteDir = createRemoteTempDir(options.remote, remoteTemplate);
+    localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
     knowledgeJson(localDir, ['db', 'init', '--scope', 'project', '--json'], localCommandOptions);
     remoteKnowledgeJson(options.remote, remoteDir, ['db', 'init', '--scope', 'project', '--json']);
 
@@ -584,23 +588,50 @@ function runSyncSmoke(options, runOptions = {}) {
     return summary;
   } finally {
     if (!options.keepTemp) {
-      rmSync(localDir, { recursive: true, force: true });
-      // Belt-and-braces re-check before the delete. `remoteDir`/`remoteTemplate` are const and
-      // the validator is pure, so this cannot currently fail - it exists so a future refactor
-      // that makes the value reassignable is caught here rather than at the `rm -rf`.
-      // A throw inside `finally` would REPLACE any in-flight exception from the try block and
-      // skip the cleanup below, so it is contained: report and skip the delete, never mask.
-      let remoteDirStillValid = true;
-      try {
-        assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
-      } catch (error) {
-        remoteDirStillValid = false;
-        process.stderr.write(
-          `[smoke] refusing remote cleanup, temp dir no longer validates: ${error instanceof Error ? error.message : String(error)}\n`
-        );
+      // EVERY statement in this finally is individually contained. A throw here would replace
+      // the in-flight exception from the try block - turning a real smoke failure into a
+      // confusing cleanup error - and would skip the remaining cleanup. Containing only the
+      // one statement that "cannot currently fail" while leaving the two that can is not
+      // containment.
+      const report = (what, error) => process.stderr.write(
+        `[smoke] ${what}: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+
+      if (localDir !== null) {
+        try {
+          rmSync(localDir, { recursive: true, force: true });
+        } catch (error) {
+          report(`could not remove local temp dir ${localDir}`, error);
+        }
       }
-      if (remoteDirStillValid) {
-        run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
+
+      if (remoteDir !== null) {
+        // Re-check before the delete. remoteDir is assigned once from a validated value, so
+        // this cannot currently fail; it exists so a future refactor that makes the value
+        // reassignable is caught here rather than at the `rm -rf`.
+        let remoteDirStillValid = true;
+        try {
+          assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
+        } catch (error) {
+          remoteDirStillValid = false;
+          report('refusing remote cleanup, temp dir no longer validates', error);
+        }
+
+        if (remoteDirStillValid) {
+          try {
+            // A failed remote delete leaves the temp dir behind; `run` swallows the exit
+            // status, so it is surfaced here rather than discarded.
+            const cleanup = run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
+            if (cleanup.status !== 0) {
+              report(
+                `remote cleanup of ${remoteDir} on ${options.remote} exited ${cleanup.status}; it may still exist`,
+                cleanup.stderr.trim() || 'no stderr'
+              );
+            }
+          } catch (error) {
+            report(`remote cleanup of ${remoteDir} could not be spawned`, error);
+          }
+        }
       }
     }
   }

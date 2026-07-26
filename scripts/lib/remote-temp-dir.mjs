@@ -10,8 +10,9 @@ import { posix } from 'node:path';
  * `mktemp -d` exits 1, so it aborts the run and never yields an empty string. The reachable
  * hole is the remote exiting **zero** with stdout that is not the path: an ssh `Banner`, a
  * chatty login profile, or a `ForceCommand` wrapper prepends lines, and a wrapper can mask
- * the real exit status entirely. Whatever lands in that variable is then interpolated into
- * `--peer-workspace` and into `ssh <host> rm -rf <value>`.
+ * the real exit status entirely. Whatever lands in that variable is then passed as a
+ * `--peer-workspace` argv element and, more importantly, interpolated into the remote shell
+ * strings `cd <value> && knowledge ...` and `rm -rf <value>`.
  *
  * That is the same class as the 2026-07-24 incident - a delete target taken on faith from a
  * command's output - which is why the check belongs at the assignment rather than relying on
@@ -57,7 +58,7 @@ export function assertRemoteTempDir(remote, dir, template) {
   if (!match) {
     throw new Error(`Remote temp dir template must end in at least three X, got ${JSON.stringify(template)}.`);
   }
-  const [, prefix] = match;
+  const [, prefix, xRun] = match;
   // Without a fixed part in the final component, `prefix` is a bare directory and every
   // sibling under it would validate - the parent-only check this function exists to avoid.
   if (prefix.endsWith('/')) {
@@ -78,6 +79,13 @@ export function assertRemoteTempDir(remote, dir, template) {
   const suffix = dir.slice(prefix.length);
   if (suffix === '') fail('path is the bare template prefix, so mktemp created nothing');
   if (suffix.includes('/')) fail('path descends below the directory the template would create');
+  // mktemp replaces the X run with exactly that many characters from [A-Za-z0-9]. Requiring
+  // the same shape is what makes "only what this template could have produced" literally
+  // true, rather than "anything under the prefix without a slash in it".
+  if (suffix.length !== xRun.length) {
+    fail(`path suffix is ${suffix.length} characters, but the template's X run is ${xRun.length}`);
+  }
+  if (!/^[A-Za-z0-9]+$/.test(suffix)) fail('path suffix contains characters mktemp never generates');
 
   return dir;
 }
