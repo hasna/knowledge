@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertRemoteTempDir } from './lib/remote-temp-dir.mjs';
+import { createRemoteTempDir, removeRemoteTempDir } from './lib/remote-temp-dir.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
@@ -154,9 +154,22 @@ function removeTempDirSafely(dir, label) {
   }
 }
 
-function createRemoteTempDir(remote, template) {
-  const dir = runRemote(remote, `mktemp -d ${shellQuote(template)}`).trim();
-  return assertRemoteTempDir(remote, dir, template);
+/** `mktemp -d <template>` on the remote host; throws on a non-zero remote exit. */
+function remoteMktemp(remote, template) {
+  return runRemote(remote, `mktemp -d ${shellQuote(template)}`);
+}
+
+/** `rm -rf <dir>` on the remote host, reporting a non-zero exit rather than discarding it. */
+function remoteRemoveDir(remote, dir) {
+  // A failed remote delete leaves the temp dir behind; `run` swallows the exit status, so it is
+  // surfaced here rather than discarded.
+  const cleanup = run('ssh', [remote, `rm -rf ${shellQuote(dir)}`]);
+  if (cleanup.status !== 0) {
+    reportCleanupProblem(
+      `remote cleanup of ${dir} on ${remote} exited ${cleanup.status}; it may still exist`,
+      cleanup.stderr.trim() || 'no stderr'
+    );
+  }
 }
 
 function parseJsonOutput(label, raw) {
@@ -457,7 +470,7 @@ function runSyncSmoke(options, runOptions = {}) {
   const localCommandOptions = runOptions.localCommandOptions ?? {};
   const learnCommandOptions = runOptions.learnCommandOptions ?? {};
   try {
-    remoteDir = createRemoteTempDir(options.remote, remoteTemplate);
+    remoteDir = createRemoteTempDir(options.remote, remoteTemplate, remoteMktemp);
     localDir = mkdtempSync(join(tmpdir(), `knowledge-linux-node-b-${options.knowledgeVersion}-`));
     knowledgeJson(localDir, ['db', 'init', '--scope', 'project', '--json'], localCommandOptions);
     remoteKnowledgeJson(options.remote, remoteDir, ['db', 'init', '--scope', 'project', '--json']);
@@ -624,35 +637,14 @@ function runSyncSmoke(options, runOptions = {}) {
       // smoke failure into a confusing cleanup error - and would skip the remaining cleanup.
 
       removeTempDirSafely(localDir, 'local temp dir');
-
-      if (remoteDir !== null) {
-        // Re-check before the delete. remoteDir is assigned once from a validated value, so
-        // this cannot currently fail; it exists so a future refactor that makes the value
-        // reassignable is caught here rather than at the `rm -rf`.
-        let remoteDirStillValid = true;
-        try {
-          assertRemoteTempDir(options.remote, remoteDir, remoteTemplate);
-        } catch (error) {
-          remoteDirStillValid = false;
-          reportCleanupProblem('refusing remote cleanup, temp dir no longer validates', error);
-        }
-
-        if (remoteDirStillValid) {
-          try {
-            // A failed remote delete leaves the temp dir behind; `run` swallows the exit
-            // status, so it is surfaced here rather than discarded.
-            const cleanup = run('ssh', [options.remote, `rm -rf ${shellQuote(remoteDir)}`]);
-            if (cleanup.status !== 0) {
-              reportCleanupProblem(
-                `remote cleanup of ${remoteDir} on ${options.remote} exited ${cleanup.status}; it may still exist`,
-                cleanup.stderr.trim() || 'no stderr'
-              );
-            }
-          } catch (error) {
-            reportCleanupProblem(`remote cleanup of ${remoteDir} could not be spawned`, error);
-          }
-        }
-      }
+      // Null-guarded, re-validated and contained inside the helper, which is what makes the
+      // re-check reachable by a test. remoteDir is assigned once from an already-validated
+      // value, so the re-check cannot currently fail; it exists so a future refactor that makes
+      // the value reassignable is caught there rather than at the `rm -rf`.
+      removeRemoteTempDir(options.remote, remoteDir, remoteTemplate, {
+        deleteDir: (dir) => remoteRemoveDir(options.remote, dir),
+        report: reportCleanupProblem,
+      });
     }
   }
 }
@@ -870,6 +862,32 @@ function main() {
 }
 
 /**
+ * Same file on disk, following symlinks on both sides.
+ *
+ * A lexical `resolve()` comparison is NOT enough, and getting this wrong fails in the silent
+ * direction. Node resolves the main module through symlinks before deriving
+ * `import.meta.url`, so under any symlinked layout - a pnpm-style
+ * `node_modules/@hasna/knowledge -> <store>/package`, or macOS `/tmp -> /private/tmp` in the
+ * documented `npm pack && tar xzf` evidence procedure - argv[1] is the link path while
+ * `import.meta.url` is the real path. They never compare equal, the script does nothing, and
+ * it exits 0: a caller checking only the exit status records a green release smoke that never
+ * ran. Bun keeps the link path on both sides, which is why a bun-only test cannot see it.
+ *
+ * When a path cannot be resolved at all - a virtual filesystem, a file deleted out from under a
+ * running process - this falls back to the lexical comparison rather than returning false. The
+ * defect being fixed is a script that silently does nothing, so the fallback is the pre-existing
+ * behaviour rather than a new way to skip the run, and it can never make `import` execute
+ * `main()`: on import argv[1] is a different file under either comparison.
+ */
+function isSameFile(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return a === b;
+  }
+}
+
+/**
  * Run only when invoked directly, never on import.
  *
  * `main()` at module scope means merely importing this file performs `bun install -g` locally
@@ -877,11 +895,14 @@ function main() {
  * not hypothetical: it fired during review of this very PR, when the file was imported to test
  * import resolution, and it installed a package on the reviewer's machine and attempted a
  * remote install. A published script must not mutate a machine as a side effect of being
- * loaded. Compared against argv rather than `import.meta.main`, which Node did not support
- * until v24 and which would silently turn this script into a no-op there.
+ * loaded. Compared against argv rather than `import.meta.main`, which is a recent addition and
+ * is simply `undefined` on older Node releases - reading it there would turn this script into
+ * exactly the silent no-op described above. (An earlier version of this comment said Node had
+ * no support until v24; measured, v22.22.3 defines it as a boolean. The reason to avoid it is
+ * older runtimes, not v24.)
  */
 const invokedDirectly = process.argv[1] !== undefined
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  && isSameFile(resolve(process.argv[1]), fileURLToPath(import.meta.url));
 
 if (invokedDirectly) {
   main();

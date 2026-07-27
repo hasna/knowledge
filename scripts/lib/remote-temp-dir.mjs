@@ -89,3 +89,68 @@ export function assertRemoteTempDir(remote, dir, template) {
 
   return dir;
 }
+
+/**
+ * Create a remote temp dir, returning only a path this exact template could have produced.
+ *
+ * `makeTempDir` is injected rather than imported so this module never spawns a process - the
+ * published script stays the only thing that talks to ssh - and, more to the point, so a test
+ * can drive THIS function, the one that decides whether the validator runs at all. Exercising
+ * `assertRemoteTempDir` on its own proves the validator works but pins nothing about it being
+ * wired in: deleting the call below used to leave the entire suite green.
+ *
+ * @param {string} remote Remote host.
+ * @param {string} template Absolute template passed to `mktemp -d`, ending in `XXX...`.
+ * @param {(remote: string, template: string) => string} makeTempDir Runs `mktemp -d <template>`
+ *   on `remote` and returns its stdout. Expected to throw on a non-zero remote exit.
+ * @returns {string} The validated directory.
+ * @throws {Error} If the value is anything other than a directory that template could create.
+ */
+export function createRemoteTempDir(remote, template, makeTempDir) {
+  const raw = makeTempDir(remote, template);
+  // A non-string reaches the guard as-is rather than dying on `.trim()`, so a wrapper returning
+  // something unexpected produces the explanatory refusal instead of a bare TypeError.
+  const dir = typeof raw === 'string' ? raw.trim() : raw;
+  return assertRemoteTempDir(remote, dir, template);
+}
+
+/**
+ * Delete a remote temp dir, but only after re-checking that the value is still something
+ * `template` could have produced, and without ever throwing.
+ *
+ * That re-check is the last gate in front of a recursive delete on another machine, which is
+ * why it lives here rather than inline in the caller's `finally`: the property worth pinning is
+ * a negative - `deleteDir` must NOT be called when the value does not validate - and a negative
+ * is unobservable while the gate sits in a cleanup block no test can drive.
+ *
+ * Callers use this from `finally`, where a throw would replace the in-flight exception and skip
+ * the remaining cleanup, so every step is contained and problems are handed to `report`.
+ *
+ * @param {string} remote Remote host.
+ * @param {string|null|undefined} dir Candidate delete target; nullish means there is nothing to
+ *   clean up, which is normal when creation itself failed.
+ * @param {string} template The template `dir` was created from.
+ * @param {{
+ *   deleteDir: (dir: string) => void,
+ *   report: (what: string, error: unknown) => void,
+ * }} io `deleteDir` performs the remote delete; `report` records a cleanup problem and must not
+ *   throw.
+ * @returns {boolean} Whether the delete was attempted.
+ */
+export function removeRemoteTempDir(remote, dir, template, { deleteDir, report }) {
+  if (dir === null || dir === undefined) return false;
+
+  try {
+    assertRemoteTempDir(remote, dir, template);
+  } catch (error) {
+    report('refusing remote cleanup, temp dir no longer validates', error);
+    return false;
+  }
+
+  try {
+    deleteDir(dir);
+  } catch (error) {
+    report(`remote cleanup of ${dir} could not be spawned`, error);
+  }
+  return true;
+}
