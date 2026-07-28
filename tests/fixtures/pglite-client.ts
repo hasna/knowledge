@@ -3,11 +3,12 @@
  * Postgres semantics — triggers, generated columns, `IS NOT DISTINCT FROM`,
  * transaction-local GUCs — rather than a SQL-string-matching fake.
  *
- * There was already one of these inlined in search-pg-parity.test.ts. It is
- * extracted here because it was missing `transaction()`, and a second copy that
- * silently lacks a method the code under test now calls is the same
- * two-implementations-drift-apart failure the versioning trigger exists to
- * prevent. One shim, one place to keep it complete.
+ * There was already one of these inlined in search-pg-parity.test.ts, missing
+ * `transaction()`. A second copy that silently lacks a method the code under
+ * test now calls is the same two-implementations-drift-apart failure the
+ * versioning trigger exists to prevent, so that file now imports this one
+ * instead of keeping its own — the claim "one shim" is only worth making if the
+ * duplicate is actually gone.
  */
 import { PGlite } from '@electric-sql/pglite';
 import { apiKeyMigrations } from '@hasna/contracts/auth';
@@ -76,10 +77,12 @@ export function pgliteClient(db: PGlite): PoolQueryClient {
  * reads.
  *
  * Applying ALL of PG_MIGRATIONS (rather than the subset whose text mentions a
- * table of interest) is deliberate: the versioning trigger and its sibling table
- * are separate statements whose names do not contain `knowledge_items`, so a
- * name filter would quietly skip exactly the DDL under test and every assertion
- * would then run against a schema production never has.
+ * table of interest) is deliberate. MEASURED against the current array: a
+ * `.includes('knowledge_items')` filter keeps 11 of 75 statements and DOES keep
+ * the entry trigger and the versions table — but drops the append-only guard and
+ * both secondary indexes, because `'knowledge_item_versions'` does not contain
+ * `'knowledge_items'` as a substring. A filter that silently produces a schema
+ * production never has is not a base any assertion below should stand on.
  */
 export async function applyKnowledgePgMigrations(db: PGlite): Promise<void> {
   // Production creates this before the table DDL. PGlite has gen_random_uuid in

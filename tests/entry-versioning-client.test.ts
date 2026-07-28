@@ -214,6 +214,35 @@ describe('knowledge versions / diff — CLI against the live server', () => {
     expect(diff.stderr).toContain('no retained prior versions');
   }, 60_000);
 
+  test('versions pages, so history past one page is still reachable', async () => {
+    // The server caps a page at 200. Without an offset, an entry with more
+    // retained versions than that reports them in `total` and can never return
+    // them — a retrieval hole, not a display one. Proven here at limit 1 so the
+    // assertion needs three edits rather than two hundred.
+    const store = cloudStore();
+    const created = await store.create({ title: 'Paged', content: 'v1' });
+    await store.update(created.id, { content: 'v2' });
+    await store.update(created.id, { content: 'v3' });
+    await store.update(created.id, { content: 'v4' });
+    const cliEnv = cloudEnv as Record<string, string>;
+
+    const first = await runCli(['versions', '--id', created.id, '--limit', '1', '--json'], cliEnv);
+    expect(first.exitCode).toBe(0);
+    const page1 = JSON.parse(first.stdout) as { total: number; page: number; versions: { version: number }[] };
+    expect(page1.total).toBe(3);
+    expect(page1.page).toBe(1);
+    expect(page1.versions.map((v) => v.version)).toEqual([3]);
+
+    const second = await runCli(['versions', '--id', created.id, '--limit', '1', '--page', '2', '--json'], cliEnv);
+    expect(second.exitCode).toBe(0);
+    const page2 = JSON.parse(second.stdout) as { page: number; versions: { version: number }[] };
+    expect(page2.page).toBe(2);
+    expect(page2.versions.map((v) => v.version)).toEqual([2]);
+
+    const third = await runCli(['versions', '--id', created.id, '--limit', '1', '--page', '3', '--json'], cliEnv);
+    expect((JSON.parse(third.stdout) as { versions: { version: number }[] }).versions.map((v) => v.version)).toEqual([1]);
+  }, 60_000);
+
   test('versions on an absent id exits 1 rather than printing an empty history', async () => {
     const result = await runCli(['versions', '--id', 'k_absent_entirely', '--json'], cloudEnv as Record<string, string>);
     expect(result.exitCode).toBe(1);

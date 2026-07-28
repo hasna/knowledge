@@ -415,7 +415,7 @@ export const PG_MIGRATIONS: string[] = [
     actor TEXT,
     reason TEXT,
     valid_from TEXT,
-    valid_to TEXT NOT NULL DEFAULT NOW()::text,
+    valid_to TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     UNIQUE(item_id, version)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_knowledge_item_versions_item
@@ -489,12 +489,27 @@ export const PG_MIGRATIONS: string[] = [
         NULLIF(current_setting('hasna.actor', true), ''),
         NULLIF(current_setting('hasna.reason', true), ''),
         OLD.updated_at,
-        NOW()::text);
+        to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'));
 
      -- The bump and the snapshot are ONE write. The counter advances by exactly
      -- one and only here, so a caller can neither skip it nor forge it.
      NEW.version := OLD.version + 1;
-     NEW.updated_at := NOW()::text;
+
+     -- updated_at is TEXT and the application fills it with toISOString(), so
+     -- the trigger must write the SAME shape. NOW()::text renders as
+     -- '2026-07-28 21:29:56.01+00'; space (0x20) sorts below 'T' (0x54), so a
+     -- column carrying both formats orders every trigger-written row before
+     -- every application-written one regardless of actual time, and valid_from
+     -- (copied verbatim from the row below) would stop being comparable with
+     -- valid_to. One format, no casts needed at read time.
+     --
+     -- Only stamped when the caller did NOT set it. Import, sync replay, and
+     -- backfill carry a SOURCE timestamp and kept it before this trigger
+     -- existed; silently replacing it would be a regression. A writer that says
+     -- nothing still gets a truthful advance.
+     IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+       NEW.updated_at := to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+     END IF;
      RETURN NEW;
    END
    $knowledge_item_version$ LANGUAGE plpgsql`,
@@ -515,4 +530,56 @@ export const PG_MIGRATIONS: string[] = [
      END IF;
    END
    $knowledge_item_version_trigger$`,
+
+  // A trigger created normally does NOT fire while `session_replication_role =
+  // replica`. That is not an exotic setting: it is what logical-replication
+  // apply workers, `pg_restore --disable-triggers`, and AWS DMS set. MEASURED
+  // against a plain trigger — the update lands, the prior body is destroyed, no
+  // version row appears, AND the counter stays put, so `version` then actively
+  // lies about the row. With the deployed source still unlocated (task
+  // e0759534), any move of this data runs through one of those paths.
+  //
+  // ENABLE ALWAYS closes it. Idempotent, so re-running the migration is a no-op.
+  //
+  // What it does NOT close, stated rather than left implied: the table owner can
+  // still `ALTER TABLE ... DISABLE TRIGGER`. Nothing a trigger can do defends
+  // against its own owner; the service connects with a DML-only role, for which
+  // both this and the replication role are already refused.
+  `ALTER TABLE knowledge_items ENABLE ALWAYS TRIGGER trg_knowledge_items_version`,
+
+  // Append-only, enforced rather than merely named. Nothing in this package
+  // updates a retained version, so refusing it costs nothing and removes the one
+  // way history can be edited in place instead of added to. MEASURED before
+  // this: a plain application role could `UPDATE knowledge_item_versions SET
+  // content = ...` and rewrite a snapshot silently.
+  //
+  // DELETE is deliberately NOT blocked: `knowledge_item_versions` cascades from
+  // `knowledge_items`, and refusing it here would make `knowledge delete` fail
+  // outright. History for a deleted entry therefore goes with the entry — the
+  // S3 journal (task 7b80e498) is what survives that, and until it lands this
+  // table is append-only for LIVE entries, not durable across deletion.
+  `CREATE OR REPLACE FUNCTION knowledge_item_versions_append_only()
+   RETURNS TRIGGER AS $knowledge_item_versions_append_only$
+   BEGIN
+     RAISE EXCEPTION 'knowledge_item_versions is append-only: version % of item % cannot be rewritten',
+       OLD.version, OLD.item_id
+       USING ERRCODE = 'restrict_violation';
+   END
+   $knowledge_item_versions_append_only$ LANGUAGE plpgsql`,
+
+  `DO $knowledge_item_versions_guard$
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_knowledge_item_versions_append_only'
+          AND tgrelid = 'knowledge_item_versions'::regclass
+     ) THEN
+       CREATE TRIGGER trg_knowledge_item_versions_append_only
+         BEFORE UPDATE ON knowledge_item_versions
+         FOR EACH ROW EXECUTE FUNCTION knowledge_item_versions_append_only();
+     END IF;
+   END
+   $knowledge_item_versions_guard$`,
+
+  `ALTER TABLE knowledge_item_versions ENABLE ALWAYS TRIGGER trg_knowledge_item_versions_append_only`,
 ];

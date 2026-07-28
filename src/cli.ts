@@ -1945,7 +1945,15 @@ async function run(argv: string[]): Promise<void> {
 
   if (command === 'versions') {
     requireId(flags);
-    const history = await itemStore.listVersions(flags.id!, { limit: flags.limit });
+    const versionsPage = Number.isFinite(flags.page) && (flags.page as number) > 0 ? (flags.page as number) : 1;
+    const versionsLimit = Number.isFinite(flags.limit) && (flags.limit as number) > 0 ? (flags.limit as number) : undefined;
+    // The server caps a page at 200. Without an offset an entry past that
+    // many retained versions has history it reports in `total` but cannot
+    // return, which is a retrieval hole rather than a display one.
+    const history = await itemStore.listVersions(flags.id!, {
+      limit: versionsLimit,
+      offset: (versionsPage - 1) * (versionsLimit ?? 50),
+    });
     // null is NO SUCH ITEM. It is reported as an error, never as an empty
     // history — "never edited" and "does not exist" must not print the same
     // line, which is precisely how the sibling implementation's empty result
@@ -1956,6 +1964,7 @@ async function run(argv: string[]): Promise<void> {
       id: history.item_id,
       current_version: history.current_version,
       total: history.total,
+      page: versionsPage,
       store: itemStore.location,
       versions: history.items,
       message: history.total === 0
@@ -2093,7 +2102,7 @@ async function run(argv: string[]): Promise<void> {
     requireId(flags);
     const current = await itemStore.get(flags.id!);
     if (!current) throw new Error(`Item not found: ${flags.id}`);
-    const item = await itemStore.update(current.id, { archived: command === 'archive' });
+    const item = await itemStore.update(current.id, { archived: command === 'archive' }, { expectedVersion: current.version });
     output({ ok: true, item, message: `${command === 'archive' ? 'Archived' : 'Restored'} ${item?.id ?? current.id}` }, flags.json, flags);
     return;
   }
@@ -2150,7 +2159,7 @@ async function run(argv: string[]): Promise<void> {
     if (removed === 0) {
       throw new Error(`No matching tag on ${current.id}: ${notFound.map((tag) => JSON.stringify(tag)).join(', ')} not in [${before.map((tag) => JSON.stringify(tag)).join(', ')}]`);
     }
-    const item = await itemStore.update(current.id, { tags });
+    const item = await itemStore.update(current.id, { tags }, { expectedVersion: current.version });
     // A partial miss must be visible too, not just the all-miss case — and it has to be
     // in `message`, because non-JSON output prints nothing else.
     //
@@ -2201,7 +2210,7 @@ async function run(argv: string[]): Promise<void> {
       added = tagsToAppend(existing.tags, flags.tag);
       if (added.length > 0) patch.tags = [...(existing.tags ?? []), ...added];
     }
-    const item = await itemStore.update(existing.id, patch);
+    const item = await itemStore.update(existing.id, patch, { expectedVersion: existing.version });
     output(tagCountResult({ ok: true, created: false, item }, `Upserted ${item?.id ?? existing.id}`, added), flags.json, flags);
     return;
   }

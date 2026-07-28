@@ -196,6 +196,110 @@ describe('entry versioning — schema and trigger', () => {
     expect(rows[1]!.metadata).toEqual({ k: 1 });
   });
 
+  test('the trigger is ENABLE ALWAYS, so a replication/restore session cannot bypass it', async () => {
+    // A plain trigger does NOT fire while session_replication_role = replica —
+    // which is exactly what logical-replication apply workers, `pg_restore
+    // --disable-triggers`, and AWS DMS set. Under a plain trigger this update
+    // lands with the prior body destroyed AND the counter left at 1, so
+    // `version` then actively lies about the row. The design pre-committed to
+    // this test ("any success is a P0 and Phase 1 does not ship").
+    const enabled = await sharedDb.query<{ tgenabled: string }>(
+      `SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_knowledge_items_version'
+         AND tgrelid = 'knowledge_items'::regclass`,
+    );
+    expect(enabled.rows[0]?.tgenabled).toBe('A'); // 'A' = ALWAYS, 'O' = origin-only
+
+    const { db, repo } = await harness();
+    const item = await repo.create({ title: 'T', content: 'body before replication' });
+    try {
+      await db.query(`SET session_replication_role = replica`);
+      await db.query(`UPDATE knowledge_items SET content = $2 WHERE id = $1`, [item.id, 'body written as replica']);
+    } finally {
+      await db.query(`SET session_replication_role = origin`);
+    }
+
+    const rows = await versionRows(db, item.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.content).toBe('body before replication');
+    expect((await currentRow(db, item.id)).version).toBe(2);
+  });
+
+  test('the trigger writes updated_at in the SAME ISO-8601 shape the application uses', async () => {
+    // NOW()::text renders as '2026-07-28 21:29:56.010+00' — a second, different
+    // format in a TEXT column the application fills with toISOString(). Space
+    // (0x20) sorts below 'T' (0x54), so in a mixed column EVERY trigger-written
+    // timestamp sorts before EVERY application-written one regardless of actual
+    // time, and any text comparison of updated_at silently inverts.
+    const { db, repo } = await harness();
+    const item = await repo.create({ title: 'T', content: 'a' });
+    const appWritten = String((await currentRow(db, item.id)).updated_at);
+    expect(appWritten).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    await db.query(`UPDATE knowledge_items SET content = 'b' WHERE id = $1`, [item.id]);
+    const triggerWritten = String((await currentRow(db, item.id)).updated_at);
+    expect(triggerWritten).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    // The point of one shared format: plain text ordering has to stay truthful.
+    expect(triggerWritten > appWritten).toBe(true);
+
+    // valid_from is copied verbatim from the row it snapshots, so the two ends
+    // of a validity range must be comparable as text without casting either.
+    const rows = await versionRows(db, item.id);
+    expect(String(rows[0]!.valid_to)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(String(rows[0]!.valid_to) > String(rows[0]!.valid_from)).toBe(true);
+  });
+
+  test('an explicitly supplied updated_at is preserved, not overwritten', async () => {
+    // Import, sync replay, and backfill carry a SOURCE timestamp. Before the
+    // trigger existed those writes kept it; silently replacing it with now()
+    // would be a regression this change introduced.
+    const { db, repo } = await harness();
+    const item = await repo.create({ title: 'T', content: 'a' });
+    await db.query(`UPDATE knowledge_items SET content = 'b', updated_at = $2 WHERE id = $1`, [
+      item.id,
+      '2019-03-04T05:06:07.008Z',
+    ]);
+    expect(String((await currentRow(db, item.id)).updated_at)).toBe('2019-03-04T05:06:07.008Z');
+    // The snapshot still happened — preserving the caller's timestamp is not a
+    // licence to skip history.
+    expect(await versionRows(db, item.id)).toHaveLength(1);
+    expect((await currentRow(db, item.id)).version).toBe(2);
+  });
+
+  test('a retained version row cannot be rewritten', async () => {
+    // "Append-only" has to be enforced, not merely named. Nothing in this
+    // package updates this table, so blocking it costs nothing and removes the
+    // one way history can be edited in place rather than added to.
+    const { db, repo } = await harness();
+    const item = await repo.create({ title: 'T', content: 'original' });
+    await repo.update(item.id, { content: 'edited' });
+    expect(await versionRows(db, item.id)).toHaveLength(1);
+
+    await expect(
+      db.query(`UPDATE knowledge_item_versions SET content = 'rewritten' WHERE item_id = $1`, [item.id]),
+    ).rejects.toThrow(/append-only/i);
+    expect((await versionRows(db, item.id))[0]!.content).toBe('original');
+  });
+
+  test('tenancy is carried into the snapshot when the schema has a tenant_id column', async () => {
+    // This repo's knowledge_items has no tenant column; the deployed build's
+    // does. The trigger reads it through to_jsonb(OLD) so ONE migration is
+    // correct against both. Without this test that branch has no input that can
+    // distinguish it from a hardcoded NULL — measured: replacing it with NULL
+    // was the one planted defect the suite did not catch.
+    const { db, repo } = await harness();
+    await db.query(`ALTER TABLE knowledge_items ADD COLUMN tenant_id TEXT`);
+    try {
+      const item = await repo.create({ title: 'T', content: 'a' });
+      await db.query(`UPDATE knowledge_items SET tenant_id = 'tenant-abc' WHERE id = $1`, [item.id]);
+      await db.query(`UPDATE knowledge_items SET content = 'b' WHERE id = $1`, [item.id]);
+      const rows = await versionRows(db, item.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.tenant_id).toBe('tenant-abc');
+    } finally {
+      await db.query(`ALTER TABLE knowledge_items DROP COLUMN tenant_id`);
+    }
+  });
+
   test('a version-worthy change always advances updated_at, even when the caller does not', async () => {
     const { db, repo } = await harness();
     const item = await repo.create({ title: 'T', content: 'body' });
