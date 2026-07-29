@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — direct unit coverage for safety, source ingestion, and workspaces
+
+- Added module-focused tests for safety policy decisions and persistence, read-only
+  file/web/open-files source ingestion and refusal paths, and canonical workspace
+  resolution, scaffolding, configuration, and file permissions.
+
 ## Unreleased — the backend is chosen explicitly, and test egress is refused
 
 **BREAKING for the fleet flip.** `HASNA_KNOWLEDGE_API_URL` +
