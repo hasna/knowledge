@@ -452,7 +452,7 @@ export function mergeLegacyKnowledgeWorkspace(
     };
   }
 
-  return withStoreLocks([options.current.jsonStorePath, options.legacy.jsonStorePath], () => {
+  return withStoreLocks<KnowledgeLegacyWorkspaceMergeResult>([options.current.jsonStorePath, options.legacy.jsonStorePath], () => {
     const lockedCurrentStore = readMergeStore(options.current.jsonStorePath);
     const lockedLegacyStore = readMergeStore(options.legacy.jsonStorePath);
     const lockedPlan = mergeStats(lockedCurrentStore, lockedLegacyStore);

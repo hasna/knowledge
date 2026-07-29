@@ -369,7 +369,7 @@ async function buildSearchDraft(options: KnowledgeAgentContextPackOptions, maxIt
     citationMap.set(citation.id, item.citation);
   });
 
-  const evidence = context.excerpts.slice(0, Math.max(maxItems * 2, maxItems)).map((excerpt) => {
+  const evidence = context.excerpts.slice(0, Math.max(maxItems * 2, maxItems)).map((excerpt): KnowledgeAgentContextEvidence => {
     const result = context.results.find((entry) => entry.id === excerpt.result_id);
     const citation = excerpt.citation_id ? citationMap.get(excerpt.citation_id) : null;
     const redacted = redactPreview(excerpt.text, options.safetyPolicy, 520);

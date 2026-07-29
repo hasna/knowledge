@@ -69,6 +69,22 @@ export interface AppWikiNoteGetResult {
   content: string | null;
 }
 
+interface AppWikiCitationRow {
+  id: string;
+  chunk_id: string | null;
+  source_uri: string;
+  quote: string | null;
+  start_offset: number | null;
+  end_offset: number | null;
+  metadata_json: string;
+  created_at: string;
+}
+
+type AppWikiCitationRecord = Omit<AppWikiCitationRow, 'metadata_json'> & {
+  metadata_json: undefined;
+  metadata: Record<string, unknown>;
+};
+
 export interface AppWikiNoteWriteResult {
   ok: true;
   scope: string;
@@ -631,21 +647,12 @@ export async function getAppWikiNote(options: AppWikiNoteGetOptions): Promise<Ap
          AND metadata_json LIKE '%"app_wiki":true%'`,
     ).get(options.id, options.id);
     if (!row) return null;
-    const citations = db.query<{
-      id: string;
-      chunk_id: string | null;
-      source_uri: string;
-      quote: string | null;
-      start_offset: number | null;
-      end_offset: number | null;
-      metadata_json: string;
-      created_at: string;
-    }, [string]>(
+    const citations = db.query<AppWikiCitationRow, [string]>(
       `SELECT id, chunk_id, source_uri, quote, start_offset, end_offset, metadata_json, created_at
        FROM citations
        WHERE wiki_page_id = ?
        ORDER BY created_at ASC`,
-    ).all(row.id).map((citation) => ({
+    ).all(row.id).map((citation): AppWikiCitationRecord => ({
       ...citation,
       metadata: parseJsonObject(citation.metadata_json),
       metadata_json: undefined,

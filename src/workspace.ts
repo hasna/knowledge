@@ -100,7 +100,7 @@ export const EXAMPLE_KNOWLEDGE_CANONICAL = {
     env: 'example/knowledge/prod/env',
     aws: 'example/knowledge/prod/aws',
     s3: 'example/knowledge/prod/s3',
-    rds: null,
+    rds: null as null,
     future_rds: 'example/knowledge/prod/rds',
   },
   source_owner: 'open-files',

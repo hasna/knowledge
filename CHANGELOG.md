@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — `noImplicitAny` production-source groundwork
+
+- Give all 11 affected production-source object literals genuine contextual
+  types, without changing their runtime values or public signatures.
+- Add the repository's missing `typecheck` script. Enabling `noImplicitAny`
+  remains deferred until the 50 diagnostics in the test suite are typed in the
+  follow-up slice.
+
 ## Unreleased — the backend is chosen explicitly, and test egress is refused
 
 **BREAKING for the fleet flip.** `HASNA_KNOWLEDGE_API_URL` +

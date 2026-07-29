@@ -976,7 +976,7 @@ function legacyAgentContextPack(
   const maxItems = Math.max(1, Math.min(options.maxItems ?? options.limit ?? 8, 50));
   const maxTokens = Math.max(500, Math.min(options.maxTokens ?? 6000, 100000));
   let redactions = 0;
-  const citations = context.citations.slice(0, Math.max(maxItems * 2, maxItems)).map((citation, index) => {
+  const citations = context.citations.slice(0, Math.max(maxItems * 2, maxItems)).map((citation, index): KnowledgeAgentContextPack['citations'][number] => {
     const quote = redactPreviewForPack(citation.quote, policy, index < 3 ? 220 : 140);
     redactions += quote.redactions;
     const ref = citation.source_ref ?? citation.source_uri ?? citation.artifact_path ?? citation.artifact_uri ?? citation.id;
@@ -1001,7 +1001,7 @@ function legacyAgentContextPack(
     };
   });
   const citationByRetrievalId = new Map(context.citations.map((citation, index) => [citation.id, citations[index]]));
-  const evidence = context.excerpts.slice(0, Math.max(maxItems * 2, maxItems)).map((excerpt) => {
+  const evidence = context.excerpts.slice(0, Math.max(maxItems * 2, maxItems)).map((excerpt): KnowledgeAgentContextPack['evidence'][number] => {
     const result = context.results.find((entry) => entry.id === excerpt.result_id);
     const citation = excerpt.citation_id ? citationByRetrievalId.get(excerpt.citation_id) : undefined;
     const preview = redactPreviewForPack(excerpt.text, policy, 520);
