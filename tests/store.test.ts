@@ -71,7 +71,9 @@ describe('JSON knowledge store', () => {
 
     ensureStore(storePath);
     expect(loadStoreIfExists(storePath)).toEqual({ exists: true, items: [] });
-    expect(statSync(storePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(statSync(storePath).mode & 0o777).toBe(0o600);
+    }
 
     const saved = { items: [item('k_saved')] };
     saveStore(storePath, saved);
