@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — direct unit coverage for previously filename-uncovered modules
+
+- Added focused behavior tests for the Postgres migration contract and the
+  approval-gated conflict proposal agent, including idempotency, database
+  constraints, fake proposals, missing evidence, and credential refusal.
+
 ## Unreleased — the backend is chosen explicitly, and test egress is refused
 
 **BREAKING for the fleet flip.** `HASNA_KNOWLEDGE_API_URL` +
