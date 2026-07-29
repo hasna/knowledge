@@ -53,6 +53,21 @@ import {
 import { ingestSourceRef } from './source-ingest';
 import { resolveOpenFilesSource } from './source-resolver';
 import { providerStatus, listModelRegistry, type ProviderStatusResult, type ModelRegistryEntry } from './providers';
+import {
+  enqueueKnowledgePromotion,
+  getKnowledgePromotion,
+  listDurableKnowledgeRecords,
+  listKnowledgePromotions,
+  promoteKnowledgeCandidate,
+  rejectKnowledgePromotion,
+  reviewKnowledgePromotion,
+  type DurableKnowledgeRecord,
+  type EnqueueKnowledgePromotionInput,
+  type KnowledgePromotionCandidate,
+  type KnowledgePromotionKind,
+  type KnowledgePromotionStatus,
+  type PromoteKnowledgeCandidateOptions,
+} from './promotion-inbox';
 import { enqueueMissingEmbeddings, refreshEmbeddingIndex, reindexHealth, type ReindexRuntimeOptions } from './reindex';
 import { retrieveKnowledgeContext, retrieveKnowledgeContextFromItems, retrieveKnowledgeContextFromSearch, type KnowledgeContextPack, type RetrievalOptions } from './retrieval';
 import {
@@ -206,6 +221,8 @@ export interface KnowledgeInventoryResult {
   sync_conflicts: Array<Record<string, unknown>>;
   approval_gates: Array<Record<string, unknown>>;
   audit_events: Array<Record<string, unknown>>;
+  promotion_candidates: Array<Record<string, unknown>>;
+  durable_records: Array<Record<string, unknown>>;
   message: string;
 }
 
@@ -884,6 +901,8 @@ function emptyKnowledgeDbStats(): ReturnType<typeof getKnowledgeDbStats> {
     sync_conflicts: 0,
     sync_table_clocks: 0,
     sync_imports: 0,
+    promotion_candidates: 0,
+    durable_records: 0,
   };
 }
 
@@ -1814,6 +1833,38 @@ export class KnowledgeService {
     return getKnowledgeDbStats(workspace.knowledgeDbPath);
   }
 
+  enqueuePromotion(input: EnqueueKnowledgePromotionInput): { created: boolean; candidate: KnowledgePromotionCandidate } {
+    return enqueueKnowledgePromotion(this.ensureWorkspace().knowledgeDbPath, input);
+  }
+
+  promotionInbox(options: {
+    status?: KnowledgePromotionStatus | 'inbox';
+    kind?: KnowledgePromotionKind;
+    limit?: number;
+  } = {}): KnowledgePromotionCandidate[] {
+    return listKnowledgePromotions(this.ensureWorkspace().knowledgeDbPath, options);
+  }
+
+  getPromotion(id: string): KnowledgePromotionCandidate | null {
+    return getKnowledgePromotion(this.ensureWorkspace().knowledgeDbPath, id);
+  }
+
+  reviewPromotion(id: string, now?: Date): KnowledgePromotionCandidate {
+    return reviewKnowledgePromotion(this.ensureWorkspace().knowledgeDbPath, id, now);
+  }
+
+  promoteCandidate(id: string, options: PromoteKnowledgeCandidateOptions = {}) {
+    return promoteKnowledgeCandidate(this.ensureWorkspace().knowledgeDbPath, id, options);
+  }
+
+  rejectPromotion(id: string, options: { rejectedBy?: string; now?: Date } = {}): KnowledgePromotionCandidate {
+    return rejectKnowledgePromotion(this.ensureWorkspace().knowledgeDbPath, id, options);
+  }
+
+  durableRecords(options: { kind?: KnowledgePromotionKind; status?: string; limit?: number } = {}): DurableKnowledgeRecord[] {
+    return listDurableKnowledgeRecords(this.ensureWorkspace().knowledgeDbPath, options);
+  }
+
   /**
    * Build a knowledge inventory from a bare item list (no local sqlite catalog).
    * Shared by the local no-db path and the cloud path so both produce the exact
@@ -1858,6 +1909,8 @@ export class KnowledgeService {
       sync_conflicts: stats.sync_conflicts,
       sync_table_clocks: stats.sync_table_clocks,
       sync_imports: stats.sync_imports,
+      promotion_candidates: stats.promotion_candidates,
+      durable_records: stats.durable_records,
     };
     return {
       ok: true,
@@ -1907,6 +1960,8 @@ export class KnowledgeService {
       sync_conflicts: [],
       approval_gates: [],
       audit_events: [],
+      promotion_candidates: [],
+      durable_records: [],
       message: `${items.length} item(s), 0 source(s), 0 chunk(s), 0 wiki page(s), 0 artifact(s)`,
     };
   }
