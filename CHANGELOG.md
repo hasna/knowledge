@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — direct store and conflict-agent unit coverage
+
+- Add module-named unit suites for the JSON store and sync conflict proposal
+  agent, including malformed input, lock cleanup, legacy import, missing-row,
+  run-ledger, and provider-credential refusal paths.
+
 ## Unreleased — the backend is chosen explicitly, and test egress is refused
 
 **BREAKING for the fleet flip.** `HASNA_KNOWLEDGE_API_URL` +
