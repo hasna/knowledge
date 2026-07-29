@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — focused safety, source-ingest, and workspace tests
+
+- Added direct unit coverage for safety policy decisions, redaction and audit
+  persistence, source ingestion success/refusal paths, and workspace path/config
+  boundaries. Production behavior is unchanged.
+
 ## Unreleased — the backend is chosen explicitly, and test egress is refused
 
 **BREAKING for the fleet flip.** `HASNA_KNOWLEDGE_API_URL` +
