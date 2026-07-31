@@ -833,6 +833,46 @@ function rowsWithJsonFields(
   });
 }
 
+function parseInventoryJsonArray(value: unknown): unknown[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseInventoryJsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'string') return {};
+  return parseMetadataJson(value);
+}
+
+function promotionCandidateInventoryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...row };
+  next.source_refs = parseInventoryJsonArray(next.source_refs_json);
+  next.evidence_refs = parseInventoryJsonArray(next.evidence_refs_json);
+  next.requires_approval = next.requires_approval === 1 || next.requires_approval === true;
+  next.checks = parseInventoryJsonObject(next.checks_json);
+  next.metadata = parseInventoryJsonObject(next.metadata_json);
+  delete next.source_refs_json;
+  delete next.evidence_refs_json;
+  delete next.checks_json;
+  delete next.metadata_json;
+  return next;
+}
+
+function durableRecordInventoryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...row };
+  next.source_refs = parseInventoryJsonArray(next.source_refs_json);
+  next.evidence_refs = parseInventoryJsonArray(next.evidence_refs_json);
+  next.metadata = parseInventoryJsonObject(next.metadata_json);
+  delete next.source_refs_json;
+  delete next.evidence_refs_json;
+  delete next.metadata_json;
+  return next;
+}
+
 function selectInventoryRows(
   db: ReturnType<typeof openKnowledgeDb>,
   sql: string,
@@ -2174,6 +2214,57 @@ export class KnowledgeService {
         LIMIT ?
       `, [limit]));
 
+      const promotionCandidates = selectInventoryRows(db, `
+        SELECT
+          id,
+          record_kind,
+          title,
+          substr(content, 1, 220) AS content_preview,
+          canonical_key,
+          content_hash,
+          source_kind,
+          source_refs_json,
+          evidence_refs_json,
+          status,
+          requires_approval,
+          checks_json,
+          duplicate_of,
+          approved_by,
+          promoted_record_id,
+          metadata_json,
+          created_at,
+          updated_at,
+          reviewed_at,
+          promoted_at
+        FROM knowledge_promotion_candidates
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT ?
+      `, [limit]).map(promotionCandidateInventoryRow);
+
+      const durableRecords = selectInventoryRows(db, `
+        SELECT
+          id,
+          record_kind,
+          title,
+          substr(content, 1, 220) AS content_preview,
+          canonical_key,
+          content_hash,
+          status,
+          source_refs_json,
+          evidence_refs_json,
+          confidence,
+          valid_from,
+          valid_to,
+          promoted_from_candidate_id,
+          approved_by,
+          metadata_json,
+          created_at,
+          updated_at
+        FROM durable_knowledge_records
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT ?
+      `, [limit]).map(durableRecordInventoryRow);
+
       const summary = {
         legacy_items: legacyStore.items.length,
         active_items: activeItems.length,
@@ -2200,6 +2291,8 @@ export class KnowledgeService {
         sync_conflicts: stats.sync_conflicts,
         sync_table_clocks: stats.sync_table_clocks,
         sync_imports: stats.sync_imports,
+        promotion_candidates: stats.promotion_candidates,
+        durable_records: stats.durable_records,
       };
 
       return {
@@ -2241,6 +2334,8 @@ export class KnowledgeService {
         sync_conflicts: syncConflicts,
         approval_gates: approvalGates,
         audit_events: auditEvents,
+        promotion_candidates: promotionCandidates,
+        durable_records: durableRecords,
         message: `${legacyStore.items.length} item(s), ${stats.sources} source(s), ${stats.chunks} chunk(s), ${stats.wiki_pages} wiki page(s), ${stats.storage_objects} artifact(s)`,
       };
     } finally {
