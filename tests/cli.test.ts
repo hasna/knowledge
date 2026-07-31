@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { delimiter, join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { migrateKnowledgeDb, openKnowledgeDb } from '../src/knowledge-db';
+import { CURRENT_SCHEMA_VERSION, migrateKnowledgeDb, openKnowledgeDb } from '../src/knowledge-db';
 import { KNOWLEDGE_API_KEY_ENV_KEYS, KNOWLEDGE_API_URL_ENV_KEYS } from '../src/knowledge-mode';
 import { createKnowledgeService } from '../src/service';
 import { parseSourceRef } from '../src/source-ref';
@@ -2357,13 +2357,13 @@ describe('knowledge cli', () => {
     const init = runCli(['db', 'init', '--scope', 'project', '--json'], dir);
     expect(init.exitCode).toBe(0);
     const initOut = JSON.parse(new TextDecoder().decode(init.stdout));
-    expect(initOut.schema_version).toBe(9);
+    expect(initOut.schema_version).toBe(CURRENT_SCHEMA_VERSION);
     expect(existsSync(join(dir, '.hasna', 'knowledge', 'knowledge.db'))).toBe(true);
 
     const stats = runCli(['db', 'stats', '--scope', 'project', '--json'], dir);
     expect(stats.exitCode).toBe(0);
     const statsOut = JSON.parse(new TextDecoder().decode(stats.stdout));
-    expect(statsOut.schema_version).toBe(9);
+    expect(statsOut.schema_version).toBe(CURRENT_SCHEMA_VERSION);
     expect(statsOut.sources).toBe(0);
     expect(statsOut.runs).toBe(0);
 
@@ -2389,7 +2389,7 @@ describe('knowledge cli', () => {
     expect(init.exitCode).toBe(0);
     const initOut = JSON.parse(new TextDecoder().decode(init.stdout));
     expect(initOut.ok).toBe(true);
-    expect(initOut.schema_version).toBe(9);
+    expect(initOut.schema_version).toBe(CURRENT_SCHEMA_VERSION);
 
     const stats = runCli(['db', 'stats', '--scope', 'global', '--json'], dir, {
       HOME: home,
@@ -2397,7 +2397,7 @@ describe('knowledge cli', () => {
     });
     expect(stats.exitCode).toBe(0);
     const statsOut = JSON.parse(new TextDecoder().decode(stats.stdout));
-    expect(statsOut.schema_version).toBe(9);
+    expect(statsOut.schema_version).toBe(CURRENT_SCHEMA_VERSION);
 
     const db = openKnowledgeDb(dbPath);
     try {
@@ -2435,7 +2435,7 @@ describe('knowledge cli', () => {
     const statusAfterSnapshot = runCli(['sync', 'status', '--scope', 'project', '--json'], dir);
     expect(statusAfterSnapshot.exitCode).toBe(0);
     const statusAfterSnapshotOut = JSON.parse(new TextDecoder().decode(statusAfterSnapshot.stdout));
-    expect(statusAfterSnapshotOut.sqlite_schema_version).toBe(9);
+    expect(statusAfterSnapshotOut.sqlite_schema_version).toBe(CURRENT_SCHEMA_VERSION);
 
     const machines = runCli(['sync', 'machines', '--scope', 'project', '--json'], dir);
     expect(machines.exitCode).toBe(0);

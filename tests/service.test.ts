@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CURRENT_SCHEMA_VERSION } from '../src/knowledge-db';
 import { createKnowledgeService } from '../src/service';
 
 function normalizeDarwinPath(path: string): string {
@@ -23,7 +24,7 @@ describe('knowledge service facade', () => {
     expect(service.validateStorage().ok).toBe(true);
 
     const migration = service.initDb();
-    expect(migration.schema_version).toBe(9);
+    expect(migration.schema_version).toBe(CURRENT_SCHEMA_VERSION);
 
     const ingest = await service.ingestSource(sourceRef, 'knowledge_index');
     expect(ingest.chunks_inserted).toBe(1);
