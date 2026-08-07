@@ -24,6 +24,10 @@ import {
   type KnowledgePrivateInputDescriptor,
 } from '../src/index';
 import { createServeHandler } from '../src/serve';
+import type {
+  PoolQueryClient,
+  TypedQueryClient,
+} from '../src/generated/storage-kit/index.js';
 import { createMigratedPglite } from './fixtures/pglite-client';
 
 const SIGNING = 'test-signing-secret-not-a-real-key';
@@ -42,18 +46,52 @@ const BINDING: KnowledgeGuardedBinding = {
 let db: PGlite;
 let server: { port: number; stop: (closeActive?: boolean) => void };
 let env: NodeJS.ProcessEnv;
+const guardedSqlTrace: string[] = [];
+
+function tracedQueryClient(base: PoolQueryClient): PoolQueryClient {
+  const trace = (client: TypedQueryClient): TypedQueryClient => ({
+    query: (sql, params) => {
+      guardedSqlTrace.push(sql);
+      return client.query(sql, params);
+    },
+    many: (sql, params) => {
+      guardedSqlTrace.push(sql);
+      return client.many(sql, params);
+    },
+    get: (sql, params) => {
+      guardedSqlTrace.push(sql);
+      return client.get(sql, params);
+    },
+    one: (sql, params) => {
+      guardedSqlTrace.push(sql);
+      return client.one(sql, params);
+    },
+    execute: (sql, params) => {
+      guardedSqlTrace.push(sql);
+      return client.execute(sql, params);
+    },
+  });
+  const traced = trace(base);
+  return {
+    ...traced,
+    pool: base.pool,
+    transaction: (fn) => base.transaction((client) => fn(trace(client))),
+    close: () => base.close(),
+  };
+}
 
 beforeAll(async () => {
   const created = await createMigratedPglite();
   db = created.db;
-  const store = new ApiKeyStore(created.client);
+  const client = tracedQueryClient(created.client);
+  const store = new ApiKeyStore(client);
   const verifier = verifyApiKey({
     app: 'knowledge',
     signingSecret: SIGNING,
     isRevoked: store.isRevoked,
   });
   const handler = createServeHandler({
-    client: created.client,
+    client,
     verifier,
     store,
     version: '9.9.9',
@@ -596,7 +634,18 @@ describe('FCAME-1 guarded Knowledge writer', () => {
     })).rejects.toBeInstanceOf(KnowledgeGuardedManifestConflictError);
 
     await manifestWriter.execute(first);
+    guardedSqlTrace.length = 0;
     await manifestWriter.execute(second);
+    const manifestLockIndex = guardedSqlTrace.findIndex((sql) => (
+      sql.includes('knowledge_guarded_write_manifests')
+      && sql.includes('FOR UPDATE')
+    ));
+    const prerequisiteReceiptIndex = guardedSqlTrace.findIndex((sql) => (
+      sql.includes('knowledge_guarded_write_receipts')
+      && sql.includes('deterministic_key = $1')
+    ));
+    expect(manifestLockIndex).toBeGreaterThanOrEqual(0);
+    expect(prerequisiteReceiptIndex).toBeGreaterThan(manifestLockIndex);
     const reconciliation = await manifestWriter.reconcileManifest(manifestId);
     expect(reconciliation.steps.map((step) => step.state))
       .toEqual(['accepted', 'accepted', 'unverified_external_authority']);

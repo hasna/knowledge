@@ -20204,9 +20204,14 @@ class GuardedWriteRepo {
     const manifestBinding = envelope.descriptor.manifest;
     if (!manifestBinding)
       return;
+    const lockedManifest = await client.get(`SELECT manifest_id FROM knowledge_guarded_write_manifests
+        WHERE manifest_id = $1
+        FOR UPDATE`, [manifestBinding.manifest_id]);
+    if (!lockedManifest)
+      throw new HttpError(409, "guarded manifest does not exist.");
     const manifest = await this.manifestById(client, manifestBinding.manifest_id);
     if (!manifest)
-      throw new HttpError(409, "guarded manifest does not exist.");
+      throw new Error("locked guarded manifest disappeared inside its transaction.");
     const step = manifest.steps[manifestBinding.ordinal];
     if (!step || step.ordinal !== manifestBinding.ordinal) {
       throw new HttpError(409, "guarded manifest step does not exist.");

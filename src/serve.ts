@@ -815,8 +815,19 @@ class GuardedWriteRepo {
   ): Promise<void> {
     const manifestBinding = envelope.descriptor.manifest;
     if (!manifestBinding) return;
+    // Serialize every primary and recovery decision for one manifest through
+    // commit. Without this shared row lock, a next-primary transaction and a
+    // recovery transaction can both observe the other's receipt as absent at
+    // READ COMMITTED, then commit contradictory effects and terminal receipts.
+    const lockedManifest = await client.get<{ manifest_id: string }>(
+      `SELECT manifest_id FROM knowledge_guarded_write_manifests
+        WHERE manifest_id = $1
+        FOR UPDATE`,
+      [manifestBinding.manifest_id],
+    );
+    if (!lockedManifest) throw new HttpError(409, 'guarded manifest does not exist.');
     const manifest = await this.manifestById(client, manifestBinding.manifest_id);
-    if (!manifest) throw new HttpError(409, 'guarded manifest does not exist.');
+    if (!manifest) throw new Error('locked guarded manifest disappeared inside its transaction.');
     const step = manifest.steps[manifestBinding.ordinal];
     if (!step || step.ordinal !== manifestBinding.ordinal) {
       throw new HttpError(409, 'guarded manifest step does not exist.');
